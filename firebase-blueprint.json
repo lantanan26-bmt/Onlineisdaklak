@@ -1,0 +1,461 @@
+{
+  "entities": {
+    "ConnectionTest": {
+      "title": "ConnectionTest",
+      "description": "Lightweight document used to verify Firestore server connectivity on startup",
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Connection status flag"
+        }
+      }
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Global application settings including school names and active exam selection",
+      "type": "object",
+      "properties": {
+        "schools": {
+          "type": "array",
+          "description": "List of registered school names (max 50)"
+        },
+        "activeExamId": {
+          "type": "string",
+          "description": "Default active exam profile ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last config update"
+        }
+      },
+      "required": ["schools", "activeExamId", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized system administrator marker",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Admin email address",
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "TeacherEmailAccess": {
+      "title": "TeacherEmailAccess",
+      "description": "Maps verified teacher Google email to their cloud RBAC permissions",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified Google email",
+          "maxLength": 160
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Granted TeacherPermission codes (max 15)"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether cloud access is active"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp"
+        }
+      },
+      "required": ["email", "permissions", "isActive", "updatedAt"]
+    },
+    "ExamProfile": {
+      "title": "ExamProfile",
+      "description": "Metadata and parts configuration for an online grade/class exam",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique exam profile ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "grade": {
+          "type": "string",
+          "description": "Target grade level",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "className": {
+          "type": "string",
+          "description": "Target class filter or all classes",
+          "maxLength": 60
+        },
+        "title": {
+          "type": "string",
+          "description": "Exam title",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "Exam description",
+          "maxLength": 500
+        },
+        "examMinutes": {
+          "type": "number",
+          "description": "Exam duration in minutes"
+        },
+        "parts": {
+          "type": "array",
+          "description": "Ordered list of exam parts (max 40)"
+        },
+        "batchCount": {
+          "type": "number",
+          "description": "Number of question batch documents under question_batches"
+        },
+        "isPublished": {
+          "type": "boolean",
+          "description": "Whether students can access this exam"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "UID of admin/teacher who saved the exam",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["id", "grade", "title", "examMinutes", "parts", "batchCount", "isPublished", "updatedAt"]
+    },
+    "ExamQuestionBatch": {
+      "title": "ExamQuestionBatch",
+      "description": "Chunked batch of exam questions kept under 750KB to respect Firestore 1MB limit and minimize Spark reads",
+      "type": "object",
+      "properties": {
+        "examId": {
+          "type": "string",
+          "description": "Parent exam ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "batchIndex": {
+          "type": "number",
+          "description": "Zero-based batch index"
+        },
+        "questions": {
+          "type": "array",
+          "description": "Native array of question objects in this batch (max 50 per batch)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp"
+        }
+      },
+      "required": ["examId", "batchIndex", "questions", "updatedAt"]
+    },
+    "StudentRecord": {
+      "title": "StudentRecord",
+      "description": "Student roster entry and latest graded exam summary (supports 1000+ students via 1-doc-per-student)",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Student ID / SBD",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Student full name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "grade": {
+          "type": "string",
+          "description": "Grade level",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "className": {
+          "type": "string",
+          "description": "Class name",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "school": {
+          "type": "string",
+          "description": "School name",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "examId": {
+          "type": "string",
+          "description": "Submitted exam profile ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "score": {
+          "type": "number",
+          "description": "Earned exam score"
+        },
+        "total": {
+          "type": "number",
+          "description": "Maximum exam score"
+        },
+        "points10": {
+          "type": "string",
+          "description": "Normalized 10-point score string",
+          "maxLength": 16
+        },
+        "sectionScores": {
+          "type": "object",
+          "description": "Per-section score summary map"
+        },
+        "partScores": {
+          "type": "object",
+          "description": "Per-part score summary map"
+        },
+        "questionScores": {
+          "type": "object",
+          "description": "Per-question score map"
+        },
+        "details": {
+          "type": "object",
+          "description": "Submitted student answers map"
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "Formatted submission time",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["id", "name", "grade", "className", "school", "updatedAt"]
+    },
+    "ExamSubmission": {
+      "title": "ExamSubmission",
+      "description": "Immutable submission log created when a student finishes an online exam",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Submission document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Referenced student ID",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "examId": {
+          "type": "string",
+          "description": "Referenced exam profile ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "score": {
+          "type": "number",
+          "description": "Earned points"
+        },
+        "total": {
+          "type": "number",
+          "description": "Total maximum points"
+        },
+        "points10": {
+          "type": "string",
+          "description": "Normalized 10-point score",
+          "maxLength": 16
+        },
+        "sectionScores": {
+          "type": "object",
+          "description": "Section scores map"
+        },
+        "partScores": {
+          "type": "object",
+          "description": "Part scores map"
+        },
+        "questionScores": {
+          "type": "object",
+          "description": "Question scores map"
+        },
+        "details": {
+          "type": "object",
+          "description": "Student answer payload"
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "Submission display time",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        }
+      },
+      "required": ["id", "studentId", "examId", "score", "total", "points10", "submittedAt", "createdAt"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Teacher RBAC permissions and hashed login configuration without PII or plaintext password",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Teacher code e.g. GV01",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Teacher display name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "username": {
+          "type": "string",
+          "description": "Lowercase login username",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "passHash": {
+          "type": "string",
+          "description": "SHA-256 hash of teacher portal password",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "assignedGrades": {
+          "type": "array",
+          "description": "Assigned grades list (max 10)"
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Granted TeacherPermission codes (max 15)"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether teacher account is active"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Display creation date",
+          "maxLength": 40
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp"
+        }
+      },
+      "required": ["id", "name", "username", "passHash", "permissions", "isActive", "createdAt", "updatedAt"]
+    },
+    "TeacherPrivateContact": {
+      "title": "TeacherPrivateContact",
+      "description": "Isolated PII contact info and admin-editable credential copy restricted strictly to admins",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Teacher email address",
+          "maxLength": 160
+        },
+        "phone": {
+          "type": "string",
+          "description": "Teacher phone number",
+          "maxLength": 32
+        },
+        "password": {
+          "type": "string",
+          "description": "Admin-managed credential copy",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp"
+        }
+      },
+      "required": ["updatedAt"]
+    }
+  },
+  "firestore": {
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/ConnectionTest" },
+      "description": "Startup connection probe document"
+    },
+    "/app_config/{configId}": {
+      "schema": { "$ref": "#/entities/AppConfig" },
+      "description": "Global school list and active exam profile configuration"
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin UID registry"
+    },
+    "/teacher_emails/{emailId}": {
+      "schema": { "$ref": "#/entities/TeacherEmailAccess" },
+      "description": "Teacher email-to-RBAC permissions lookup for Google Sign-In"
+    },
+    "/exams/{examId}": {
+      "schema": { "$ref": "#/entities/ExamProfile" },
+      "description": "Published and draft grade/class exam profiles"
+    },
+    "/exams/{examId}/question_batches/{batchId}": {
+      "schema": { "$ref": "#/entities/ExamQuestionBatch" },
+      "description": "Chunked question arrays for an exam profile"
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/StudentRecord" },
+      "description": "Individual student documents supporting 1000+ student roster and scores"
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/ExamSubmission" },
+      "description": "Student exam submission records"
+    },
+    "/teacher_accounts/{username}": {
+      "schema": { "$ref": "#/entities/TeacherProfile" },
+      "description": "Teacher accounts and RBAC permissions"
+    },
+    "/teacher_accounts/{username}/private/{contactDocId}": {
+      "schema": { "$ref": "#/entities/TeacherPrivateContact" },
+      "description": "Isolated PII contact details and password copy restricted strictly to admins"
+    }
+  }
+}

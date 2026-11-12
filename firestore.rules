@@ -1,0 +1,270 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Hardened Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'lantanan26@gmail.com'
+      );
+    }
+
+    function hasTeacherCloudPerm(perm) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/teacher_emails/$(request.auth.token.email)) &&
+        get(/databases/$(database)/documents/teacher_emails/$(request.auth.token.email)).data.isActive == true &&
+        perm in get(/databases/$(database)/documents/teacher_emails/$(request.auth.token.email)).data.permissions;
+    }
+
+    // Validation Blueprints
+    function isValidAppConfig(data) {
+      return data.keys().hasAll(['schools', 'activeExamId', 'updatedAt']) &&
+        data.keys().hasOnly(['schools', 'activeExamId', 'updatedAt']) &&
+        data.schools is list && data.schools.size() >= 1 && data.schools.size() <= 50 &&
+        data.schools[0] is string && data.schools[0].size() >= 1 && data.schools[0].size() <= 150 &&
+        isValidId(data.activeExamId) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAdminUser(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+        data.uid == uid &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.createdAt == request.time;
+    }
+
+    function isValidTeacherEmailAccess(data, emailId) {
+      return data.keys().hasAll(['email', 'permissions', 'isActive', 'updatedAt']) &&
+        data.keys().hasOnly(['email', 'permissions', 'isActive', 'updatedAt']) &&
+        data.email == emailId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.permissions is list && data.permissions.size() >= 0 && data.permissions.size() <= 15 &&
+        data.isActive is bool &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidExamProfile(data, examId) {
+      return data.keys().hasAll(['id', 'grade', 'title', 'examMinutes', 'parts', 'batchCount', 'isPublished', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'grade', 'className', 'title', 'description', 'examMinutes', 'parts', 'batchCount', 'isPublished', 'ownerUid', 'updatedAt']) &&
+        data.id == examId &&
+        isValidId(data.id) &&
+        data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 40 &&
+        (!('className' in data) || (data.className is string && data.className.size() <= 60)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+        data.examMinutes is number && data.examMinutes >= 1 && data.examMinutes <= 180 &&
+        data.parts is list && data.parts.size() >= 0 && data.parts.size() <= 40 &&
+        data.batchCount is number && data.batchCount >= 0 && data.batchCount <= 200 &&
+        data.isPublished is bool &&
+        (!('ownerUid' in data) || (data.ownerUid is string && data.ownerUid.size() <= 128)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidQuestionBatch(data, examId) {
+      return data.keys().hasAll(['examId', 'batchIndex', 'questions', 'updatedAt']) &&
+        data.keys().hasOnly(['examId', 'batchIndex', 'questions', 'updatedAt']) &&
+        data.examId == examId &&
+        isValidId(data.examId) &&
+        data.batchIndex is number && data.batchIndex >= 0 && data.batchIndex < 200 &&
+        data.questions is list && data.questions.size() <= 50 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidStudentRecord(data, studentId) {
+      return data.keys().hasAll(['id', 'name', 'grade', 'className', 'school', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'grade', 'className', 'school', 'examId',
+          'score', 'total', 'points10', 'sectionScores', 'partScores',
+          'questionScores', 'details', 'submittedAt', 'updatedAt'
+        ]) &&
+        data.id == studentId &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 40 &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 60 &&
+        data.school is string && data.school.size() >= 1 && data.school.size() <= 150 &&
+        (!('examId' in data) || data.examId == null || isValidId(data.examId)) &&
+        (!('score' in data) || data.score == null || (data.score is number && data.score >= 0 && data.score <= 1000)) &&
+        (!('total' in data) || data.total == null || (data.total is number && data.total >= 0 && data.total <= 1000)) &&
+        (!('points10' in data) || data.points10 == null || (data.points10 is string && data.points10.size() <= 16)) &&
+        (!('sectionScores' in data) || data.sectionScores == null || data.sectionScores is map) &&
+        (!('partScores' in data) || data.partScores == null || data.partScores is map) &&
+        (!('questionScores' in data) || data.questionScores == null || data.questionScores is map) &&
+        (!('details' in data) || data.details == null || data.details is map) &&
+        (!('submittedAt' in data) || data.submittedAt == null || (data.submittedAt is string && data.submittedAt.size() <= 64)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidSubmission(data, submissionId) {
+      return data.keys().hasAll(['id', 'studentId', 'examId', 'score', 'total', 'points10', 'submittedAt', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'examId', 'score', 'total', 'points10',
+          'sectionScores', 'partScores', 'questionScores', 'details', 'submittedAt', 'createdAt'
+        ]) &&
+        data.id == submissionId &&
+        isValidId(data.id) &&
+        isValidId(data.studentId) &&
+        isValidId(data.examId) &&
+        data.score is number && data.score >= 0 && data.score <= 1000 &&
+        data.total is number && data.total >= 0 && data.total <= 1000 &&
+        data.points10 is string && data.points10.size() >= 1 && data.points10.size() <= 16 &&
+        (!('sectionScores' in data) || data.sectionScores is map) &&
+        (!('partScores' in data) || data.partScores is map) &&
+        (!('questionScores' in data) || data.questionScores is map) &&
+        (!('details' in data) || data.details is map) &&
+        data.submittedAt is string && data.submittedAt.size() >= 1 && data.submittedAt.size() <= 64 &&
+        data.createdAt == request.time;
+    }
+
+    function isValidTeacherProfile(data, username) {
+      return data.keys().hasAll(['id', 'name', 'username', 'passHash', 'permissions', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'username', 'passHash', 'assignedGrades', 'permissions', 'isActive', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.username == username &&
+        isValidId(data.username) &&
+        data.passHash is string && data.passHash.size() >= 16 && data.passHash.size() <= 128 &&
+        (!('assignedGrades' in data) || (data.assignedGrades is list && data.assignedGrades.size() <= 10)) &&
+        data.permissions is list && data.permissions.size() >= 0 && data.permissions.size() <= 15 &&
+        data.isActive is bool &&
+        data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 40 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidTeacherPrivateContact(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+        data.keys().hasOnly(['email', 'phone', 'password', 'updatedAt']) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+        (!('password' in data) || (data.password is string && data.password.size() <= 128)) &&
+        data.updatedAt == request.time;
+    }
+
+    // Connection test document
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+    }
+
+    // Global App Config (Schools, Active Exam ID)
+    match /app_config/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if isAdmin();
+      allow create, update: if (isAdmin() || hasTeacherCloudPerm('edit_exam') || hasTeacherCloudPerm('manage_students')) &&
+        isValidId(configId) && isValidAppConfig(incoming());
+    }
+
+    // Admin UID registry
+    match /admins/{uid} {
+      allow get: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(uid) && isValidAdminUser(incoming(), uid);
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    // Teacher verified email RBAC registry (managed strictly by Admin)
+    match /teacher_emails/{emailId} {
+      allow get: if isSignedIn() && (request.auth.token.email == emailId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && emailId is string && emailId.size() >= 3 && emailId.size() <= 160 &&
+        isValidTeacherEmailAccess(incoming(), emailId);
+      allow delete: if isAdmin() && emailId is string && emailId.size() <= 160;
+    }
+
+    // Grade/Class Exams (typically ~5 exams)
+    match /exams/{examId} {
+      allow get: if isValidId(examId);
+      allow list: if resource.data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam');
+      allow create: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidExamProfile(incoming(), examId);
+      allow update: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidExamProfile(incoming(), examId);
+      allow delete: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId);
+
+      match /question_batches/{batchId} {
+        allow get: if isValidId(examId) && isValidId(batchId) &&
+          (get(/databases/$(database)/documents/exams/$(examId)).data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam'));
+        allow list: if isValidId(examId) &&
+          (get(/databases/$(database)/documents/exams/$(examId)).data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam'));
+        allow create, update: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) &&
+          isValidId(examId) && isValidId(batchId) && isValidQuestionBatch(incoming(), examId);
+        allow delete: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidId(batchId);
+      }
+    }
+
+    // Students Collection (1 doc per student, supports 1000+ students cleanly)
+    match /students/{studentId} {
+      allow get: if isValidId(studentId);
+      allow list: if isAdmin() || hasTeacherCloudPerm('manage_students') || hasTeacherCloudPerm('view_scores') ||
+        (resource.data.className is string && resource.data.className.size() <= 60 && request.query.limit <= 60);
+      allow create: if (isAdmin() || hasTeacherCloudPerm('manage_students')) && isValidId(studentId) && isValidStudentRecord(incoming(), studentId);
+      allow update: if isValidId(studentId) && isValidStudentRecord(incoming(), studentId) && (
+        isAdmin() ||
+        hasTeacherCloudPerm('manage_students') ||
+        hasTeacherCloudPerm('reset_scores') ||
+        (
+          // Terminal state locking: Student can only submit score when submittedAt was null
+          (!('submittedAt' in existing()) || existing().submittedAt == null) &&
+          incoming().id == existing().id &&
+          incoming().name == existing().name &&
+          incoming().grade == existing().grade &&
+          incoming().className == existing().className &&
+          incoming().school == existing().school &&
+          incoming().submittedAt is string && incoming().submittedAt.size() >= 1 &&
+          incoming().score is number && incoming().score >= 0 && incoming().score <= 1000 &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'examId', 'score', 'total', 'points10', 'sectionScores', 'partScores',
+            'questionScores', 'details', 'submittedAt', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if (isAdmin() || hasTeacherCloudPerm('manage_students')) && isValidId(studentId);
+    }
+
+    // Student Exam Submissions Log
+    match /submissions/{submissionId} {
+      allow get: if (isAdmin() || hasTeacherCloudPerm('view_scores')) && isValidId(submissionId);
+      allow list: if isAdmin() || hasTeacherCloudPerm('view_scores');
+      allow create: if isValidId(submissionId) &&
+        isValidSubmission(incoming(), submissionId) &&
+        exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
+        exists(/databases/$(database)/documents/exams/$(incoming().examId));
+      allow update, delete: if (isAdmin() || hasTeacherCloudPerm('reset_scores')) && isValidId(submissionId);
+    }
+
+    // Teacher Accounts & RBAC Permissions (PII & plaintext credentials split into private subcollection)
+    match /teacher_accounts/{username} {
+      allow get: if isValidId(username);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(username) && isValidTeacherProfile(incoming(), username);
+      allow delete: if isAdmin() && isValidId(username);
+
+      match /private/{contactDocId} {
+        allow get: if isAdmin() && isValidId(username) && isValidId(contactDocId);
+        allow list: if isAdmin() && isValidId(username);
+        allow create, update: if isAdmin() && isValidId(username) && isValidId(contactDocId) && isValidTeacherPrivateContact(incoming());
+        allow delete: if isAdmin() && isValidId(username) && isValidId(contactDocId);
+      }
+    }
+  }
+}

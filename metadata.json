@@ -1,0 +1,8 @@
+{
+  "name": "Remix ISMART LMS - Quản Trị Câu Hỏi \u0026 Thi Trực Tuyến",
+  "description": "Hệ thống quản trị ngân hàng đề thi đa dạng và phòng thi trực tuyến độc lập cho học sinh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

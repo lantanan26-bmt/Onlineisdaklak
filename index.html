@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      /**
+       * Browser extension & iframe compatibility shim.
+       * Certain browser extensions (e.g. proxy/VPN extensions like Urban VPN, scrapers, translate tools)
+       * attempt to intercept network traffic by executing `window.fetch = ...`.
+       * In sandboxed iframes, `window.fetch` can be an accessor property with only a getter,
+       * triggering "TypeError: Cannot set property fetch of #<Window> which has only a getter".
+       * Defining a configurable getter & setter on `window` guarantees safe assignment and prevents unhandled errors.
+       */
+      (function() {
+        try {
+          var originalFetch = typeof window !== 'undefined' ? window.fetch : null;
+          var currentFetch = originalFetch;
+
+          // Provide both getter and setter on window
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return currentFetch;
+            },
+            set: function(fn) {
+              currentFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          });
+
+          // Also patch prototype if it exists and has an un-settable descriptor
+          var proto = Object.getPrototypeOf(window);
+          if (proto && Object.getOwnPropertyDescriptor(proto, 'fetch')) {
+            var protoDesc = Object.getOwnPropertyDescriptor(proto, 'fetch');
+            if (protoDesc && !protoDesc.set && protoDesc.configurable) {
+              Object.defineProperty(proto, 'fetch', {
+                get: function() {
+                  return currentFetch;
+                },
+                set: function(fn) {
+                  currentFetch = fn;
+                },
+                configurable: true,
+                enumerable: true
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore if descriptor modification is disallowed in strict environments
+        }
+
+        // Global safety net: suppress unhandled runtime errors coming from third-party browser extensions
+        window.addEventListener(
+          'error',
+          function(event) {
+            var filename = event.filename || '';
+            var message = (event.message || '') + '';
+            if (
+              filename.indexOf('chrome-extension://') !== -1 ||
+              filename.indexOf('moz-extension://') !== -1 ||
+              filename.indexOf('safari-extension://') !== -1 ||
+              message.indexOf('Cannot set property fetch') !== -1
+            ) {
+              event.stopImmediatePropagation();
+              event.preventDefault();
+              return true;
+            }
+          },
+          true
+        );
+
+        window.addEventListener(
+          'unhandledrejection',
+          function(event) {
+            var reason = event.reason;
+            var reasonStr = (reason && (reason.stack || reason.message || String(reason))) || '';
+            if (
+              reasonStr.indexOf('chrome-extension://') !== -1 ||
+              reasonStr.indexOf('moz-extension://') !== -1 ||
+              reasonStr.indexOf('safari-extension://') !== -1 ||
+              reasonStr.indexOf('Cannot set property fetch') !== -1
+            ) {
+              event.stopImmediatePropagation();
+              event.preventDefault();
+            }
+          },
+          true
+        );
+      })();
+    </script>
+    <title>iSMART LMS - Quản Trị Câu Hỏi & Thi Trực Tuyến</title>
+    <meta name="description" content="Hệ thống quản trị ngân hàng đề thi đa dạng và phòng thi trực tuyến độc lập cho học sinh." />
+    <meta property="og:title" content="iSMART LMS - Quản Trị Câu Hỏi & Thi Trực Tuyến" />
+    <meta property="og:description" content="Hệ thống quản trị ngân hàng đề thi đa dạng và phòng thi trực tuyến độc lập cho học sinh." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  </head>
+  <body class="bg-slate-100 text-slate-900 font-sans antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
