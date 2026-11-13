@@ -7,6 +7,7 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -60,16 +61,36 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-async function testConnection() {
+export interface CloudConnectionHealth {
+  reachable: boolean;
+  projectId: string;
+  databaseId: string;
+  error?: string;
+}
+
+export async function checkCloudConnectionStatus(): Promise<CloudConnectionHealth> {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    // app_config/main has public read access so getDocFromServer cleanly verifies live server reachability
+    await getDocFromServer(doc(db, 'app_config', 'main'));
+    return {
+      reachable: true,
+      projectId: firebaseConfig.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+    };
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
+    return {
+      reachable: false,
+      projectId: firebaseConfig.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      error: message,
+    };
   }
 }
 
-testConnection();
+checkCloudConnectionStatus();
 
 export { firebaseConfig };

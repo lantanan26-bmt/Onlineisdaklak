@@ -13,7 +13,16 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { signInWithPopup, signOut } from 'firebase/auth';
-import { auth, db, firebaseConfig, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+import {
+  auth,
+  checkCloudConnectionStatus,
+  CloudConnectionHealth,
+  db,
+  firebaseConfig,
+  googleProvider,
+  handleFirestoreError,
+  OperationType,
+} from '../firebase';
 import {
   ExamPart,
   GradeExamProfile,
@@ -29,6 +38,11 @@ export const BOOTSTRAP_ADMIN_EMAIL = 'lantanan26@gmail.com';
 const EXAM_META_TIMESTAMPS_KEY = 'ismart_cloud_exam_timestamps';
 
 export const FIRESTORE_CONSOLE_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data`;
+export const FIREBASE_AUTH_SETTINGS_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
+export const FIREBASE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+export { checkCloudConnectionStatus };
+export type { CloudConnectionHealth };
 
 const NESTED_ARRAY_KEY = '__fsArr';
 
@@ -316,7 +330,7 @@ export function formatCloudError(error: unknown): string {
   }
   if (lower.includes('unauthorized-domain')) {
     const host = typeof window !== 'undefined' ? window.location.hostname : 'tên miền hiện tại';
-    return `Tên miền "${host}" chưa được thêm vào Firebase Console -> Authentication -> Settings -> Authorized domains.`;
+    return `Tên miền "${host}" chưa được phép đăng nhập Google. Vào tab "Cấu hình & Link" bấm "Mở Authorized Domains (Firebase)" để thêm "${host}" 1 lần duy nhất.`;
   }
   if (lower.includes('permission-denied') || lower.includes('missing or insufficient permissions')) {
     const currentEmail = auth.currentUser?.email || 'chưa đăng nhập Google';

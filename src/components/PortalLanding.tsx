@@ -4,6 +4,7 @@ import { Teacher } from '../types';
 interface PortalLandingProps {
   adminPin: string;
   teachers: Teacher[];
+  cloudHealth?: 'checking' | 'connected' | 'offline';
   onLoginAdmin: () => void;
   onLoginTeacher: (teacher: Teacher) => void;
   onVerifyTeacherCloud?: (
@@ -17,6 +18,7 @@ interface PortalLandingProps {
 export const PortalLanding: React.FC<PortalLandingProps> = ({
   adminPin,
   teachers,
+  cloudHealth = 'checking',
   onLoginAdmin,
   onLoginTeacher,
   onVerifyTeacherCloud,
@@ -163,7 +165,7 @@ export const PortalLanding: React.FC<PortalLandingProps> = ({
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6">
       {/* Brand Header */}
-      <header className="max-w-xl w-full mx-auto flex items-center justify-between pb-4">
+      <header className="max-w-xl w-full mx-auto flex items-center justify-between pb-4 gap-2">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/25">
             iS
@@ -177,6 +179,32 @@ export const PortalLanding: React.FC<PortalLandingProps> = ({
             </h1>
             <p className="text-[11px] text-slate-400">Hệ thống khảo thí & thi trực tuyến</p>
           </div>
+        </div>
+        <div
+          className={`px-2.5 py-1 rounded-full border text-[11px] font-bold flex items-center gap-1.5 shrink-0 ${
+            cloudHealth === 'connected'
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              : cloudHealth === 'checking'
+              ? 'bg-slate-800 text-slate-300 border-slate-700'
+              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              cloudHealth === 'connected'
+                ? 'bg-emerald-400'
+                : cloudHealth === 'checking'
+                ? 'bg-slate-400 animate-pulse'
+                : 'bg-amber-400'
+            }`}
+          ></span>
+          <span>
+            {cloudHealth === 'connected'
+              ? 'Firebase Cloud: Tự động kết nối'
+              : cloudHealth === 'checking'
+              ? 'Đang nối Cloud...'
+              : 'Chế độ Offline'}
+          </span>
         </div>
       </header>
 

@@ -4,6 +4,8 @@ import {
   BOOTSTRAP_ADMIN_EMAIL,
   CloudInventorySummary,
   CloudSyncReport,
+  FIREBASE_AUTH_SETTINGS_URL,
+  FIREBASE_PROJECT_ID,
   FIRESTORE_CONSOLE_URL,
 } from '../services/firebaseService';
 
@@ -18,6 +20,7 @@ interface JsonConfigViewProps {
   examMinutes: number;
   adminPin: string;
   cloudUserEmail?: string | null;
+  cloudHealth?: 'checking' | 'connected' | 'offline';
   isCloudSyncing?: boolean;
   cloudInventory?: CloudInventorySummary | null;
   lastSyncReport?: CloudSyncReport | null;
@@ -50,6 +53,7 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
   examMinutes,
   adminPin,
   cloudUserEmail,
+  cloudHealth = 'checking',
   isCloudSyncing = false,
   cloudInventory,
   lastSyncReport,
@@ -102,23 +106,33 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
   const standaloneUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${window.location.pathname}?role=student`
     : '';
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
 
-  const handleCopyUrl = () => {
+  const copyTextWithToast = (text: string, successMessage: string) => {
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard
-        .writeText(standaloneUrl)
+        .writeText(text)
         .then(() => {
-          showToast('Đã sao chép đường dẫn Trang Thi Độc Lập!');
+          showToast(successMessage);
         })
         .catch(() => {
-          fallbackCopyText(standaloneUrl);
+          fallbackCopyText(text, successMessage);
         });
     } else {
-      fallbackCopyText(standaloneUrl);
+      fallbackCopyText(text, successMessage);
     }
   };
 
-  const fallbackCopyText = (text: string) => {
+  const handleCopyUrl = () => {
+    copyTextWithToast(standaloneUrl, 'Đã sao chép đường dẫn Trang Thi Độc Lập!');
+  };
+
+  const handleCopyHost = () => {
+    if (!currentHost) return;
+    copyTextWithToast(currentHost, `Đã sao chép tên miền "${currentHost}"! Hãy dán vào Firebase Authorized domains.`);
+  };
+
+  const fallbackCopyText = (text: string, successMessage = 'Đã sao chép!') => {
     try {
       const textarea = document.createElement('textarea');
       textarea.value = text;
@@ -130,7 +144,7 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
       textarea.select();
       document.execCommand('copy');
       document.body.removeChild(textarea);
-      showToast('Đã sao chép đường dẫn Trang Thi Độc Lập!');
+      showToast(successMessage);
     } catch {
       showToast('Không thể sao chép tự động, vui lòng sao chép thủ công.', 'warn');
     }
@@ -349,6 +363,67 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
             <div className="text-xl font-black text-amber-950">{cloudInventory ? cloudInventory.teachersCount : '—'}</div>
             <div className="text-[11px] text-amber-600">teacher_accounts &amp; private</div>
           </div>
+        </div>
+
+        {/* Auto-Connect Guide for Netlify, Cloudflare Pages & Custom Online Hosts */}
+        <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-slate-700 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-extrabold text-emerald-900">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  cloudHealth === 'connected'
+                    ? 'bg-emerald-500'
+                    : cloudHealth === 'checking'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-rose-500'
+                }`}
+              ></span>
+              <span>
+                Tự Động Kết Nối Khi Chạy Online (Netlify / Cloudflare Pages / Web Riêng) — Project:{' '}
+                <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{FIREBASE_PROJECT_ID}</code>
+              </span>
+            </div>
+            <span className="px-2 py-0.5 rounded-md bg-white border border-emerald-200 font-bold text-emerald-800 text-[11px]">
+              {cloudHealth === 'connected'
+                ? 'Đã tự động kết nối Cloud'
+                : cloudHealth === 'checking'
+                ? 'Đang kiểm tra kết nối...'
+                : 'Đang ngoại tuyến'}
+            </span>
+          </div>
+
+          <div className="text-[11px] leading-relaxed text-slate-700 space-y-1">
+            <div>
+              <strong>• Học sinh &amp; Giáo viên:</strong> Cấu hình Firebase đã đóng gói sẵn trong bản build (<code>dist/</code>). Khi deploy lên Netlify hay Cloudflare Pages (<code>dash.cloudflare.com</code>), web <strong>tự động tải đề, tra mã SBD, nộp bài &amp; đăng nhập GV</strong> ngay lập tức mà không cần thiết lập biến môi trường.
+            </div>
+            <div>
+              <strong>• Quyền Admin sửa &amp; đồng bộ trực tiếp trên tên miền mới:</strong> Nếu bạn mở web thử ở tên miền mới (<code>*.netlify.app</code> hoặc <code>*.pages.dev</code>) và muốn bấm <em>Kết nối Google Cloud</em>, hãy thêm tên miền hiện tại 1 lần vào danh sách cho phép của Firebase:
+            </div>
+          </div>
+
+          {currentHost && (
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <span className="text-[11px] font-bold text-slate-600">Tên miền đang chạy:</span>
+              <code className="px-2 py-1 rounded-lg bg-white border border-slate-300 font-mono text-[11px] font-bold text-slate-900">
+                {currentHost}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopyHost}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-black text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer"
+              >
+                <i className="fa-regular fa-copy"></i> Copy Tên Miền
+              </button>
+              <a
+                href={FIREBASE_AUTH_SETTINGS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[11px] flex items-center gap-1 transition"
+              >
+                <i className="fa-solid fa-shield-check"></i> Mở Authorized Domains (Firebase)
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Location Map & Any Sync Errors */}

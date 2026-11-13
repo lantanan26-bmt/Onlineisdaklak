@@ -34,6 +34,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
 import {
   BOOTSTRAP_ADMIN_EMAIL,
+  checkCloudConnectionStatus,
   CloudInventorySummary,
   CloudSyncReport,
   deleteExamFromCloud,
@@ -299,6 +300,7 @@ export default function App() {
 
   // Firebase Cloud Auth & Sync state
   const [cloudUser, setCloudUser] = useState<User | null>(null);
+  const [cloudHealth, setCloudHealth] = useState<'checking' | 'connected' | 'offline'>('checking');
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [cloudInventory, setCloudInventory] = useState<CloudInventorySummary | null>(null);
   const [lastSyncReport, setLastSyncReport] = useState<CloudSyncReport | null>(null);
@@ -311,19 +313,25 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // On startup after IndexedDB hydration, pull published exams & app config from Firestore (Spark-quota cached!)
+  // On startup after IndexedDB hydration, automatically connect & verify Firebase Cloud + pull published exams/config
   useEffect(() => {
     if (!isHydrated) return;
     let active = true;
 
     const syncPublicCloudOnBoot = async () => {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (active) setCloudHealth('offline');
+        return;
+      }
       try {
-        const [cloudConfig, cloudExams] = await Promise.all([
+        const [health, cloudConfig, cloudExams] = await Promise.all([
+          checkCloudConnectionStatus(),
           fetchAppConfigFromCloud().catch(() => null),
           fetchPublishedExamsFromCloud(gradeExams).catch(() => null),
         ]);
         if (!active) return;
+
+        setCloudHealth(health.reachable ? 'connected' : 'offline');
 
         if (cloudConfig) {
           if (cloudConfig.schools && cloudConfig.schools.length > 0) {
@@ -337,7 +345,7 @@ export default function App() {
           setGradeExams(cloudExams);
         }
       } catch {
-        // Offline or unconfigured: continue smoothly with IndexedDB data
+        if (active) setCloudHealth('offline');
       }
     };
 
@@ -363,7 +371,7 @@ export default function App() {
 
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
 
-  // When Admin/Authorized Teacher connects Google Cloud, inspect Cloud & smartly sync without wiping local edits
+  // When Admin/Authorized Teacher connects Google Cloud, inspect Cloud & independently sync per collection
   useEffect(() => {
     if (!cloudUser || !isHydrated) return;
     if (currentUserRole !== 'admin' && currentUserRole !== 'teacher') return;
@@ -373,15 +381,47 @@ export default function App() {
       try {
         const inv = await fetchCloudInventorySummary();
         if (!active) return;
+        setCloudHealth('connected');
         setCloudInventory(inv);
 
-        const cloudIsEmpty =
-          inv.examsCount === 0 ||
-          inv.studentsCount === 0 ||
-          (currentUserRole === 'admin' && inv.teachersCount === 0);
+        const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
+        const canManageStudents = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students');
+        const canManageTeachers = currentUserRole === 'admin';
+        const hasPendingLocal = hasLocalEditsRef.current;
 
-        if (cloudIsEmpty || hasLocalEditsRef.current) {
-          // Push current local data to Cloud so newly created exams/teachers/students/scores are never lost or overwritten!
+        // 1. Pull categories that ALREADY exist on Cloud (unless user made unpushed local edits)
+        if (!hasPendingLocal) {
+          const [cloudConfig, cloudExams, cloudStudents, cloudTeachers] = await Promise.all([
+            inv.schoolsCount > 0 ? fetchAppConfigFromCloud().catch(() => null) : Promise.resolve(null),
+            inv.examsCount > 0 ? fetchPublishedExamsFromCloud(gradeExams).catch(() => null) : Promise.resolve(null),
+            inv.studentsCount > 0 ? fetchAllStudentsFromCloud().catch(() => null) : Promise.resolve(null),
+            canManageTeachers && inv.teachersCount > 0
+              ? fetchTeachersForAdminFromCloud().catch(() => null)
+              : Promise.resolve(null),
+          ]);
+          if (!active) return;
+
+          if (cloudConfig) {
+            if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
+            if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
+          }
+          if (cloudExams && cloudExams.length > 0) {
+            setGradeExams(cloudExams);
+          }
+          if (cloudStudents && cloudStudents.length > 0) {
+            setStudents(cloudStudents);
+          }
+          if (cloudTeachers && cloudTeachers.length > 0) {
+            setTeachers(cloudTeachers);
+          }
+        }
+
+        // 2. Push ONLY categories that are still empty on Cloud OR have local edits
+        const needPushExams = canEditExam && (inv.examsCount === 0 || hasPendingLocal);
+        const needPushStudents = canManageStudents && (inv.studentsCount === 0 || hasPendingLocal);
+        const needPushTeachers = canManageTeachers && (inv.teachersCount === 0 || hasPendingLocal);
+
+        if (needPushExams || needPushStudents || needPushTeachers) {
           const report = await syncAllDataToCloud({
             schools,
             activeExamId,
@@ -390,29 +430,17 @@ export default function App() {
             teachers,
             ownerUid: cloudUser.uid,
             cloudEmail: cloudUser.email,
-            canSyncExams: currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam'),
-            canSyncStudents: currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students'),
-            canSyncTeachers: currentUserRole === 'admin',
+            canSyncExams: needPushExams,
+            canSyncStudents: needPushStudents,
+            canSyncTeachers: needPushTeachers,
           });
           if (!active) return;
           setLastSyncReport(report);
-          hasLocalEditsRef.current = false;
+          if (report.errors.length === 0) {
+            hasLocalEditsRef.current = false;
+          }
           const refreshed = await fetchCloudInventorySummary();
           if (active) setCloudInventory(refreshed);
-        } else {
-          // Cloud already has data & no local pending edits -> pull latest multi-device state
-          const [cloudStudents, cloudTeachers] = await Promise.all([
-            fetchAllStudentsFromCloud().catch(() => null),
-            currentUserRole === 'admin' ? fetchTeachersForAdminFromCloud().catch(() => null) : Promise.resolve(null),
-          ]);
-          if (!active) return;
-
-          if (cloudStudents && cloudStudents.length > 0) {
-            setStudents(cloudStudents);
-          }
-          if (cloudTeachers && cloudTeachers.length > 0) {
-            setTeachers(cloudTeachers);
-          }
         }
       } catch {
         // Ignore if rules deny non-authorized Google account
@@ -1414,6 +1442,7 @@ export default function App() {
         <PortalLanding
           adminPin={adminPin}
           teachers={teachers}
+          cloudHealth={cloudHealth}
           onLoginAdmin={() => {
             setCurrentUserRole('admin');
             setCurrentMode('admin');
@@ -2108,6 +2137,7 @@ export default function App() {
             examMinutes={examMinutes}
             adminPin={adminPin}
             cloudUserEmail={cloudUser?.email || null}
+            cloudHealth={cloudHealth}
             isCloudSyncing={isCloudSyncing}
             cloudInventory={cloudInventory}
             lastSyncReport={lastSyncReport}
