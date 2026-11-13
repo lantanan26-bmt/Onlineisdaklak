@@ -1,3 +1,5 @@
+import type { ColourItem } from '../types';
+
 export interface CambridgeCrayon {
   id: string; // 'yellow' | 'red' | 'blue' | 'green' | 'pink' | 'purple' | 'orange' | 'brown' | 'black' | 'eraser'
   name: string; // Tên hiển thị
@@ -103,3 +105,76 @@ export const DEFAULT_CAMBRIDGE_COLORING_SCENE = `data:image/svg+xml;utf8,${encod
     <path d="M 280 100 Q 300 80 330 90 Q 360 70 390 90 Q 420 80 430 105 Q 440 130 410 130 L 290 130 Q 270 120 280 100 Z" fill="#ffffff" stroke="#334155" stroke-width="3"/>
   </svg>`
 )}`;
+
+export interface ListenColourPointBreakdown {
+  itemPointsMap: Record<string, number>;
+  autoPerItemMap: Record<string, number>;
+  questionPoints: number;
+  sumItemPoints: number;
+  scoringCount: number;
+  hasCustomPoints: boolean;
+  isMatchedWithQuestion: boolean;
+}
+
+const roundColourPts = (val: number): number => Math.round(val * 1000) / 1000;
+
+export const formatPointsClean = (val: number): string => {
+  return String(roundColourPts(val));
+};
+
+export const getListenColourPointBreakdown = (
+  items: ColourItem[],
+  questionPoints?: number
+): ListenColourPointBreakdown => {
+  const qPts = Math.max(0, Number(questionPoints ?? 0.5) || 0);
+  const scoringItems = items.filter((it) => !it.isExample);
+  const scoringCount = scoringItems.length;
+
+  const autoPerItemMap: Record<string, number> = {};
+  if (scoringCount > 0) {
+    const baseEach = roundColourPts(qPts / scoringCount);
+    let runningSum = 0;
+    scoringItems.forEach((it, idx) => {
+      if (idx === scoringCount - 1) {
+        autoPerItemMap[it.id] = Math.max(0, roundColourPts(qPts - runningSum));
+      } else {
+        autoPerItemMap[it.id] = baseEach;
+        runningSum += baseEach;
+      }
+    });
+  }
+
+  const hasCustomPoints = scoringItems.some(
+    (it) => typeof it.points === 'number' && Number.isFinite(it.points) && it.points >= 0
+  );
+
+  const itemPointsMap: Record<string, number> = {};
+  let sumItemPoints = 0;
+
+  items.forEach((it) => {
+    if (it.isExample) {
+      itemPointsMap[it.id] = 0;
+      return;
+    }
+    const pts =
+      typeof it.points === 'number' && Number.isFinite(it.points) && it.points >= 0
+        ? roundColourPts(it.points)
+        : (autoPerItemMap[it.id] ?? 0);
+    itemPointsMap[it.id] = pts;
+    sumItemPoints += pts;
+  });
+
+  sumItemPoints = roundColourPts(sumItemPoints);
+  const isMatchedWithQuestion = scoringCount === 0 ? true : Math.abs(sumItemPoints - qPts) <= 0.002;
+
+  return {
+    itemPointsMap,
+    autoPerItemMap,
+    questionPoints: qPts,
+    sumItemPoints,
+    scoringCount,
+    hasCustomPoints,
+    isMatchedWithQuestion,
+  };
+};
+

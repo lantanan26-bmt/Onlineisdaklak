@@ -1,6 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Question, ColourItem } from '../types';
-import { CAMBRIDGE_CRAYONS, getCrayonInfo, isColorMatch } from '../utils/cambridgeColours';
+import {
+  CAMBRIDGE_CRAYONS,
+  getCrayonInfo,
+  isColorMatch,
+  getListenColourPointBreakdown,
+  formatPointsClean
+} from '../utils/cambridgeColours';
 
 interface ListenColourPlayerProps {
   question: Question;
@@ -640,58 +646,64 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-            {items.map((item, i) => {
-              const targetCrayon = getCrayonInfo(item.targetColor);
-              const userColor = userAnswer[item.id];
-              const userCrayon = userColor ? getCrayonInfo(userColor) : null;
-              const isCorrect = isColorMatch(userColor, item.targetColor);
+            {(() => {
+              const breakdown = getListenColourPointBreakdown(items, question.points ?? 0.5);
+              return items.map((item, i) => {
+                const targetCrayon = getCrayonInfo(item.targetColor);
+                const userColor = userAnswer[item.id];
+                const userCrayon = userColor ? getCrayonInfo(userColor) : null;
+                const isCorrect = isColorMatch(userColor, item.targetColor);
+                const dotPts = breakdown.itemPointsMap[item.id] ?? 0;
 
-              return (
-                <div
-                  key={i}
-                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 bg-white ${
-                    item.isExample
-                      ? 'border-emerald-300 bg-emerald-50/50'
-                      : isCorrect
-                      ? 'border-emerald-400 shadow-2xs'
-                      : 'border-red-300 bg-red-50/30'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span
-                      className="w-5 h-5 rounded-full shrink-0 border border-black/15 shadow-2xs"
-                      style={{ backgroundColor: targetCrayon.hex }}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900 truncate">
-                        {item.label}
-                        {item.isExample && (
-                          <span className="ml-1 text-[10px] text-emerald-700 font-black">[Ví dụ mẫu]</span>
+                return (
+                  <div
+                    key={i}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 bg-white ${
+                      item.isExample
+                        ? 'border-emerald-300 bg-emerald-50/50'
+                        : isCorrect
+                        ? 'border-emerald-400 shadow-2xs'
+                        : 'border-red-300 bg-red-50/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span
+                        className="w-5 h-5 rounded-full shrink-0 border border-black/15 shadow-2xs"
+                        style={{ backgroundColor: targetCrayon.hex }}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-slate-900 truncate">
+                          {item.label}
+                          {item.isExample ? (
+                            <span className="ml-1 text-[10px] text-emerald-700 font-black">[Ví dụ mẫu]</span>
+                          ) : (
+                            <span className="ml-1 text-[10px] text-slate-500 font-bold">({formatPointsClean(dotPts)}đ)</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Đáp án đúng: <strong className="text-emerald-800">{targetCrayon.name} ({targetCrayon.enName})</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {!item.isExample && (
+                      <div className="shrink-0 text-right text-xs font-bold">
+                        {isCorrect ? (
+                          <span className="text-emerald-700 font-black">✔ Đúng (+{formatPointsClean(dotPts)}đ)</span>
+                        ) : (
+                          <div className="text-red-700 leading-tight">
+                            <span className="font-black">✘ Chưa đúng (0/{formatPointsClean(dotPts)}đ)</span>
+                            <div className="text-[10px] text-slate-500">
+                              {userCrayon ? `Bé đã tô: ${userCrayon.name}` : 'Chưa tô màu'}
+                            </div>
+                          </div>
                         )}
                       </div>
-                      <div className="text-[11px] text-slate-500">
-                        Đáp án đúng: <strong className="text-emerald-800">{targetCrayon.name} ({targetCrayon.enName})</strong>
-                      </div>
-                    </div>
+                    )}
                   </div>
-
-                  {!item.isExample && (
-                    <div className="shrink-0 text-right text-xs font-bold">
-                      {isCorrect ? (
-                        <span className="text-emerald-700 font-black">✔ Đúng (+0.5đ)</span>
-                      ) : (
-                        <div className="text-red-700 leading-tight">
-                          <span className="font-black">✘ Chưa đúng</span>
-                          <div className="text-[10px] text-slate-500">
-                            {userCrayon ? `Bé đã tô: ${userCrayon.name}` : 'Chưa tô màu'}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
       )}

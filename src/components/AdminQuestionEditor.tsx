@@ -4,13 +4,20 @@ import { getAdvancedGrade2Questions, getAdvancedGrade2Parts, GRADE2_MEDIA } from
 import { QuestionAudioEditor } from './QuestionAudioEditor';
 import { AdminPartHeader } from './AdminPartHeader';
 import { GradeExamSelectorBar } from './GradeExamSelectorBar';
-import { CAMBRIDGE_CRAYONS, getCrayonInfo, DEFAULT_CAMBRIDGE_COLORING_SCENE } from '../utils/cambridgeColours';
+import {
+  CAMBRIDGE_CRAYONS,
+  getCrayonInfo,
+  DEFAULT_CAMBRIDGE_COLORING_SCENE,
+  getListenColourPointBreakdown,
+  formatPointsClean
+} from '../utils/cambridgeColours';
 import {
   getCleanPartTitle,
   canonicalSortParts,
   renumberPartsBySection,
   syncAndSortQuestionsByParts,
-  isQuestionExample
+  isQuestionExample,
+  getStoryWordBankPointBreakdown
 } from '../utils/sectionUtils';
 
 interface AdminQuestionEditorProps {
@@ -1173,12 +1180,12 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                 <span className="text-[11px] font-extrabold text-amber-900">Điểm câu:</span>
                                 <input
                                   type="number"
-                                  step="0.25"
+                                  step="any"
                                   min="0"
                                   max="100"
                                   value={q.points ?? 0.5}
                                   onChange={(e) => updateQuestion(idx, { points: parseFloat(e.target.value) || 0 })}
-                                  className="w-14 px-1 py-0.5 text-center text-xs font-black bg-white text-slate-900 border border-amber-300 rounded focus:ring-2 focus:ring-amber-500"
+                                  className="w-16 px-1 py-0.5 text-center text-xs font-black bg-white text-slate-900 border border-amber-300 rounded focus:ring-2 focus:ring-amber-500"
                                 />
                                 <span className="text-[11px] font-black text-amber-800">đ</span>
                                 <div className="flex items-center gap-0.5 ml-0.5">
@@ -3485,24 +3492,22 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                   answerImages: {}
                 };
 
-                // Dynamic slots list: ensure '0' is first, followed by numeric slots sorted
-                const answerKeys = Object.keys(sb.answers || {});
-                const nonZeroKeys = Array.from(new Set(['1', '2', '3', '4', ...answerKeys.filter((k) => k !== '0')]))
-                  .sort((a, b) => Number(a) - Number(b));
+                const totalPoints = q.points ?? 1.0;
+                const sbBreakdown = getStoryWordBankPointBreakdown(sb, totalPoints);
+                const nonZeroKeys = sbBreakdown.slotKeys;
                 const allSlots = ['0', ...nonZeroKeys];
                 const testSlotsCount = nonZeroKeys.length;
-                const totalPoints = q.points ?? 1.0;
-                const pointPerWord = testSlotsCount > 0 ? (totalPoints / testSlotsCount).toFixed(2) : '0.25';
+                const pointPerWord = testSlotsCount > 0 ? formatPointsClean(totalPoints / testSlotsCount) : '0.25';
 
                 return (
                   <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 space-y-4">
-                    <div className="text-xs font-bold text-blue-900 flex items-center justify-between">
+                    <div className="text-xs font-bold text-blue-900 flex items-center justify-between flex-wrap gap-2">
                       <span className="flex items-center gap-1.5">
                         <i className="fa-solid fa-book-open text-blue-600"></i>
                         <span>Cấu hình Đoạn văn & Ngân hàng từ (Story with Word Bank):</span>
                       </span>
                       <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-extrabold border border-blue-200">
-                        {testSlotsCount} từ thi • {pointPerWord}đ / từ (Tổng: {totalPoints}đ)
+                        {testSlotsCount} từ điền • Tổng các từ: {formatPointsClean(sbBreakdown.sumSlotPoints)} / {formatPointsClean(totalPoints)}đ
                       </span>
                     </div>
 
@@ -3631,6 +3636,73 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                       </div>
                     </div>
 
+                    {/* Point Distribution Summary & Auto-Split / Sync Controls */}
+                    <div
+                      className={`p-3 rounded-xl border-2 text-xs space-y-2 ${
+                        sbBreakdown.isMatchedWithQuestion
+                          ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                          : 'bg-amber-50 border-amber-400 text-amber-950'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-extrabold">⚖️ Chia điểm cho các từ điền vào đoạn văn:</span>
+                          <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-bold text-slate-800">
+                            Điểm câu: <strong>{formatPointsClean(sbBreakdown.questionPoints)}đ</strong> ÷ {testSlotsCount} từ điền
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-lg font-black border ${
+                              sbBreakdown.isMatchedWithQuestion
+                                ? 'bg-emerald-600 text-white border-emerald-700'
+                                : 'bg-rose-600 text-white border-rose-700'
+                            }`}
+                          >
+                            {sbBreakdown.isMatchedWithQuestion
+                              ? `✔ Tổng các từ điền: ${formatPointsClean(sbBreakdown.sumSlotPoints)} / ${formatPointsClean(sbBreakdown.questionPoints)}đ`
+                              : `⚠️ Tổng hiện tại: ${formatPointsClean(sbBreakdown.sumSlotPoints)}đ (chưa khớp ${formatPointsClean(sbBreakdown.questionPoints)}đ)`}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={testSlotsCount === 0}
+                            onClick={() => {
+                              const { answerPoints: _removed, ...restSb } = sb;
+                              updateQuestion(idx, { storyBank: restSb });
+                              showToast(
+                                `Đã chia đều ${formatPointsClean(sbBreakdown.questionPoints)}đ cho ${testSlotsCount} từ điền (${pointPerWord}đ/từ)!`,
+                                'success'
+                              );
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
+                            title="Xóa điểm tùy chỉnh để tự động chia đều (Điểm câu ÷ Số từ điền)"
+                          >
+                            ⚖️ Chia đều theo điểm câu
+                          </button>
+                          {!sbBreakdown.isMatchedWithQuestion && testSlotsCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateQuestion(idx, { points: sbBreakdown.sumSlotPoints });
+                                showToast(
+                                  `Đã cập nhật điểm của câu hỏi thành ${formatPointsClean(sbBreakdown.sumSlotPoints)}đ để khớp tổng điểm các từ điền!`,
+                                  'success'
+                                );
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition cursor-pointer shadow-xs"
+                              title="Cập nhật lại trường Điểm câu ở trên cho bằng tổng điểm các từ điền"
+                            >
+                              🔄 Cập nhật điểm câu = {formatPointsClean(sbBreakdown.sumSlotPoints)}đ
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] opacity-85">
+                        Mặc định mỗi từ điền đúng (trừ ví dụ (0)) bằng <strong>Tổng điểm câu ÷ Số từ cần điền</strong>. Thầy/Cô có thể tùy chỉnh điểm riêng từng từ ngay trên mỗi thẻ ô trống bên dưới.
+                      </div>
+                    </div>
+
                     {/* Correct Answers for blanks with Image Uploaders */}
                     <div className="pt-3 border-t border-blue-200 space-y-3">
                       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -3639,13 +3711,13 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             Đáp án đúng cho các chỗ trống & Hình ảnh minh họa:
                           </label>
                           <p className="text-[11px] text-slate-600">
-                            Bao gồm <strong>(0) làm ví dụ</strong> và các chỗ trống (1)-(4). Dưới mỗi đáp án có nút <strong>Up ảnh</strong>. Mỗi từ đúng sẽ được tính điểm thành phần (tổng {totalPoints} điểm chia đều).
+                            Bao gồm <strong>(0) làm ví dụ</strong> và các chỗ trống (1)-({testSlotsCount}). Dưới mỗi đáp án có nút <strong>Up ảnh</strong> và ô chỉnh điểm riêng cho từng từ.
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            const nums = Object.keys(sb.answers).filter((k) => k !== '0').map(Number).filter((n) => !isNaN(n));
+                            const nums = nonZeroKeys.map(Number).filter((n) => !isNaN(n));
                             const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
                             const nextAnswers = { ...sb.answers, [String(nextNum)]: '' };
                             updateQuestion(idx, {
@@ -3665,6 +3737,8 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             ? (sb.example?.word || sb.answers?.['0'] || '')
                             : (sb.answers[slotNum] || '');
                           const currentImg = sb.answerImages?.[slotNum] || (isEx ? sb.example?.img : undefined);
+                          const effectiveSlotPts = isEx ? 0 : (sbBreakdown.slotPointsMap[slotNum] ?? 0);
+                          const customSlotPts = sb.answerPoints?.[slotNum];
 
                           return (
                             <div
@@ -3677,21 +3751,49 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             >
                               {/* Slot Card Header */}
                               <div className="flex items-center justify-between gap-1 pb-1 border-b border-slate-200">
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 flex-wrap">
                                   <span className={`font-mono font-black text-xs ${isEx ? 'text-blue-900' : 'text-emerald-900'}`}>
                                     ({slotNum}):
                                   </span>
                                   {isEx ? (
                                     <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[9px] font-black uppercase border border-blue-200">
-                                      Ví dụ (Example)
+                                      Ví dụ (0đ)
                                     </span>
                                   ) : (
-                                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-800 text-[9px] font-extrabold border border-emerald-200">
-                                      {pointPerWord}đ
-                                    </span>
+                                    <div className="flex items-center gap-0.5 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded-md">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0"
+                                        max="100"
+                                        value={customSlotPts !== undefined ? customSlotPts : effectiveSlotPts}
+                                        onChange={(e) => {
+                                          const raw = e.target.value;
+                                          const parsed = raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0);
+                                          const nextAnswerPoints: Record<string, number> = { ...(sb.answerPoints || {}) };
+                                          nonZeroKeys.forEach((k) => {
+                                            if (k === slotNum) {
+                                              if (parsed === undefined) {
+                                                delete nextAnswerPoints[k];
+                                              } else {
+                                                nextAnswerPoints[k] = parsed;
+                                              }
+                                            } else if (nextAnswerPoints[k] === undefined) {
+                                              nextAnswerPoints[k] = sbBreakdown.slotPointsMap[k] ?? 0;
+                                            }
+                                          });
+                                          updateQuestion(idx, {
+                                            storyBank: { ...sb, answerPoints: nextAnswerPoints }
+                                          });
+                                        }}
+                                        className="w-12 px-0.5 py-0 text-center text-[11px] font-mono font-black bg-white border border-amber-300 rounded text-slate-900"
+                                        title={`Điểm của từ (${slotNum})`}
+                                      />
+                                      <span className="text-[10px] font-black text-amber-800">đ</span>
+                                    </div>
                                   )}
                                 </div>
-                                {!isEx && Number(slotNum) > 4 && (
+                                {!isEx && nonZeroKeys.length > 1 && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -3699,11 +3801,20 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       delete nextAnswers[slotNum];
                                       const nextImages = { ...(sb.answerImages || {}) };
                                       delete nextImages[slotNum];
+                                      const nextAnswerPoints = sb.answerPoints ? { ...sb.answerPoints } : undefined;
+                                      if (nextAnswerPoints) {
+                                        delete nextAnswerPoints[slotNum];
+                                      }
                                       updateQuestion(idx, {
-                                        storyBank: { ...sb, answers: nextAnswers, answerImages: nextImages }
+                                        storyBank: {
+                                          ...sb,
+                                          answers: nextAnswers,
+                                          answerImages: nextImages,
+                                          ...(nextAnswerPoints ? { answerPoints: nextAnswerPoints } : {})
+                                        }
                                       });
                                     }}
-                                    className="text-red-400 hover:text-red-600 text-xs"
+                                    className="text-red-400 hover:text-red-600 text-xs cursor-pointer"
                                     title="Xóa ô này"
                                   >
                                     <i className="fa-solid fa-trash-can"></i>
@@ -3883,6 +3994,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                 const W = lc.width || 800;
                 const H = lc.height || 520;
                 const items: ColourItem[] = lc.items || [];
+                const lcBreakdown = getListenColourPointBreakdown(items, q.points ?? 0.5);
 
                 return (
                   <div className="p-4 rounded-xl bg-orange-50/70 border border-orange-200 space-y-4">
@@ -4066,12 +4178,84 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   className="text-[9px] font-black text-white px-1.5 rounded-full mt-0.5"
                                   style={{ backgroundColor: crayon.borderHex }}
                                 >
-                                  {crayon.name}
+                                  {crayon.name} • {item.isExample ? '0đ' : `${formatPointsClean(lcBreakdown.itemPointsMap[item.id] ?? 0)}đ`}
                                 </span>
                               </div>
                             );
                           })}
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Point Distribution Summary & Auto-Split / Sync Controls */}
+                    <div
+                      className={`p-3 rounded-xl border-2 text-xs space-y-2 ${
+                        lcBreakdown.isMatchedWithQuestion
+                          ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                          : 'bg-amber-50 border-amber-400 text-amber-950'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-extrabold">
+                            ⚖️ Chia điểm cho từng điểm tô màu:
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-bold text-slate-800">
+                            Điểm câu: <strong>{formatPointsClean(lcBreakdown.questionPoints)}đ</strong> ÷ {lcBreakdown.scoringCount} điểm tô
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-lg font-black border ${
+                              lcBreakdown.isMatchedWithQuestion
+                                ? 'bg-emerald-600 text-white border-emerald-700'
+                                : 'bg-rose-600 text-white border-rose-700'
+                            }`}
+                          >
+                            {lcBreakdown.isMatchedWithQuestion
+                              ? `✔ Tổng các điểm tô: ${formatPointsClean(lcBreakdown.sumItemPoints)} / ${formatPointsClean(lcBreakdown.questionPoints)}đ`
+                              : `⚠️ Tổng hiện tại: ${formatPointsClean(lcBreakdown.sumItemPoints)}đ (chưa khớp ${formatPointsClean(lcBreakdown.questionPoints)}đ)`}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={lcBreakdown.scoringCount === 0}
+                            onClick={() => {
+                              const resetItems = items.map((it) => {
+                                const { points: _removed, ...rest } = it;
+                                return rest;
+                              });
+                              updateQuestion(idx, { listenColour: { ...lc, items: resetItems } });
+                              showToast(
+                                `Đã chia đều ${formatPointsClean(lcBreakdown.questionPoints)}đ cho ${lcBreakdown.scoringCount} điểm tô (${formatPointsClean(lcBreakdown.questionPoints / Math.max(1, lcBreakdown.scoringCount))}đ/điểm)!`,
+                                'success'
+                              );
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] transition cursor-pointer disabled:opacity-50"
+                            title="Xóa điểm tùy chỉnh để tự động chia đều (Điểm câu ÷ Số điểm tô)"
+                          >
+                            ⚖️ Chia đều theo điểm câu
+                          </button>
+                          {!lcBreakdown.isMatchedWithQuestion && lcBreakdown.scoringCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateQuestion(idx, { points: lcBreakdown.sumItemPoints });
+                                showToast(
+                                  `Đã cập nhật điểm của câu hỏi thành ${formatPointsClean(lcBreakdown.sumItemPoints)}đ để khớp tổng các điểm tô!`,
+                                  'success'
+                                );
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition cursor-pointer shadow-xs"
+                              title="Cập nhật lại trường Điểm câu ở trên cho bằng tổng điểm các ô tô màu"
+                            >
+                              🔄 Cập nhật điểm câu = {formatPointsClean(lcBreakdown.sumItemPoints)}đ
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] opacity-85">
+                        Mặc định mỗi điểm tô (trừ ví dụ) bằng <strong>Tổng điểm câu ÷ Số điểm tô</strong>. Thầy/Cô có thể sửa tay từng điểm tô bên dưới rồi bấm cập nhật hoặc tự cân để tổng bằng điểm 1 câu.
                       </div>
                     </div>
 
@@ -4089,6 +4273,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                         <div className="space-y-2.5">
                           {items.map((item, itIdx) => {
                             const curCrayon = getCrayonInfo(item.targetColor);
+                            const effectiveDotPts = lcBreakdown.itemPointsMap[item.id] ?? 0;
 
                             return (
                               <div
@@ -4100,7 +4285,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                 }`}
                               >
                                 <div className="flex items-center justify-between flex-wrap gap-2">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="w-6 h-6 rounded-lg bg-orange-100 text-orange-800 font-mono font-black text-xs flex items-center justify-center">
                                       #{itIdx + 1}
                                     </span>
@@ -4115,10 +4300,46 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       placeholder="Tên chi tiết (VD: Quả bóng dưới nước)..."
                                       className="px-2.5 py-1 text-xs font-bold bg-white border border-slate-300 rounded-lg w-52 sm:w-72"
                                     />
-                                    {item.isExample && (
+                                    {item.isExample ? (
                                       <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black">
-                                        ★ ĐANG LÀ VÍ DỤ MẪU
+                                        ★ VÍ DỤ MẪU (0đ)
                                       </span>
+                                    ) : (
+                                      <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-lg">
+                                        <span className="text-[11px] font-extrabold text-amber-900">Điểm:</span>
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          min="0"
+                                          max="100"
+                                          value={item.points !== undefined ? item.points : effectiveDotPts}
+                                          onChange={(e) => {
+                                            const raw = e.target.value;
+                                            const parsed = raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0);
+                                            const nextItems = items.map((it, i) => {
+                                              if (it.isExample) {
+                                                const { points: _removed, ...rest } = it;
+                                                return rest;
+                                              }
+                                              if (i === itIdx) {
+                                                if (parsed === undefined) {
+                                                  const { points: _removed, ...rest } = it;
+                                                  return rest;
+                                                }
+                                                return { ...it, points: parsed };
+                                              }
+                                              if (it.points === undefined) {
+                                                return { ...it, points: lcBreakdown.itemPointsMap[it.id] ?? 0 };
+                                              }
+                                              return it;
+                                            });
+                                            updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                                          }}
+                                          className="w-16 px-1 py-0.5 text-center text-xs font-mono font-black bg-white border border-amber-300 rounded text-slate-900"
+                                          title="Điểm của chi tiết tô màu này (có thể chỉnh tay miễn tổng các ô khớp điểm của câu)"
+                                        />
+                                        <span className="text-[11px] font-black text-amber-800">đ</span>
+                                      </div>
                                     )}
                                   </div>
 
@@ -4127,10 +4348,14 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const nextItems = items.map((it, i) => ({
-                                          ...it,
-                                          isExample: i === itIdx ? !it.isExample : false
-                                        }));
+                                        const nextItems = items.map((it, i) => {
+                                          const nextIsExample = i === itIdx ? !it.isExample : false;
+                                          if (nextIsExample) {
+                                            const { points: _removed, ...rest } = it;
+                                            return { ...rest, isExample: true };
+                                          }
+                                          return { ...it, isExample: false };
+                                        });
                                         updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                         showToast(
                                           item.isExample

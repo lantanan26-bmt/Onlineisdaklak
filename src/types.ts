@@ -67,6 +67,7 @@ export interface StoryWordBankConfig {
   words: WordBankItem[];
   answers: Record<string, string>; // e.g. { "0": "birthday", "1": "sea", "2": "singing", "3": "pasta", "4": "dolphin" }
   answerImages?: Record<string, string>; // e.g. { "0": "imgUrl", "1": "imgUrl", ... } - Hình ảnh minh họa cho từng đáp án
+  answerPoints?: Record<string, number>; // e.g. { "1": 0.25, "2": 0.25, ... } - Điểm riêng từng ô điền (nếu để trống sẽ tự chia đều từ điểm câu)
   example?: { index: number | string; word: string; img?: string };
 }
 
@@ -81,6 +82,7 @@ export interface ColourItem {
   h?: number;
   shape?: 'circle' | 'rect' | 'star';
   isExample?: boolean; // Chi tiết này đã được tô sẵn làm ví dụ mẫu cho học sinh
+  points?: number; // Điểm riêng của chi tiết tô màu này (nếu để trống sẽ tự chia đều từ tổng điểm câu)
 }
 
 export interface ListenColourConfig {

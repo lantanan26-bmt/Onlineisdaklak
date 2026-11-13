@@ -1,4 +1,4 @@
-import { ExamPart, PartScoreRecord, SectionScoreRecord, ExamSection, Question } from '../types';
+import { ExamPart, PartScoreRecord, SectionScoreRecord, ExamSection, Question, StoryWordBankConfig } from '../types';
 
 export interface SectionMeta {
   id: string;
@@ -392,4 +392,76 @@ export function renumberPartsBySection(parts: ExamPart[]): ExamPart[] {
 
   return [...renumberList(listening), ...renumberList(readingWriting), ...other];
 }
+
+export interface StoryWordBankPointBreakdown {
+  slotKeys: string[];
+  slotPointsMap: Record<string, number>;
+  autoPerSlotMap: Record<string, number>;
+  questionPoints: number;
+  sumSlotPoints: number;
+  slotCount: number;
+  hasCustomPoints: boolean;
+  isMatchedWithQuestion: boolean;
+}
+
+const roundStoryWordPts = (val: number): number => Math.round(val * 1000) / 1000;
+
+export function getStoryWordBankPointBreakdown(
+  storyBank?: StoryWordBankConfig,
+  questionPoints?: number
+): StoryWordBankPointBreakdown {
+  const qPts = Math.max(0, Number(questionPoints ?? 1.0) || 0);
+  const answersMap = storyBank?.answers || {};
+  const existingNonZero = Object.keys(answersMap).filter((k) => k !== '0');
+  const slotKeys = (existingNonZero.length > 0 ? existingNonZero : ['1', '2', '3', '4']).sort(
+    (a, b) => Number(a) - Number(b)
+  );
+  const slotCount = slotKeys.length;
+
+  const autoPerSlotMap: Record<string, number> = {};
+  if (slotCount > 0) {
+    const baseEach = roundStoryWordPts(qPts / slotCount);
+    let runningSum = 0;
+    slotKeys.forEach((key, idx) => {
+      if (idx === slotCount - 1) {
+        autoPerSlotMap[key] = Math.max(0, roundStoryWordPts(qPts - runningSum));
+      } else {
+        autoPerSlotMap[key] = baseEach;
+        runningSum += baseEach;
+      }
+    });
+  }
+
+  const customMap = storyBank?.answerPoints || {};
+  const hasCustomPoints = slotKeys.some(
+    (k) => typeof customMap[k] === 'number' && Number.isFinite(customMap[k]) && customMap[k] >= 0
+  );
+
+  const slotPointsMap: Record<string, number> = {};
+  let sumSlotPoints = 0;
+  slotKeys.forEach((k) => {
+    const raw = customMap[k];
+    const pts =
+      typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+        ? roundStoryWordPts(raw)
+        : (autoPerSlotMap[k] ?? 0);
+    slotPointsMap[k] = pts;
+    sumSlotPoints += pts;
+  });
+
+  sumSlotPoints = roundStoryWordPts(sumSlotPoints);
+  const isMatchedWithQuestion = slotCount === 0 ? true : Math.abs(sumSlotPoints - qPts) <= 0.002;
+
+  return {
+    slotKeys,
+    slotPointsMap,
+    autoPerSlotMap,
+    questionPoints: qPts,
+    sumSlotPoints,
+    slotCount,
+    hasCustomPoints,
+    isMatchedWithQuestion,
+  };
+}
+
 

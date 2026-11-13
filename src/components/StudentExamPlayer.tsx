@@ -7,8 +7,8 @@ import { CambridgePart2View } from './CambridgePart2View';
 import { CambridgePart1RWView } from './CambridgePart1RWView';
 import { CambridgePart2RWView } from './CambridgePart2RWView';
 import { ListenColourPlayer } from './ListenColourPlayer';
-import { isColorMatch } from '../utils/cambridgeColours';
-import { getQuestionPartAndIndex, isQuestionExample, getCleanPartTitle } from '../utils/sectionUtils';
+import { isColorMatch, getListenColourPointBreakdown, formatPointsClean } from '../utils/cambridgeColours';
+import { getQuestionPartAndIndex, isQuestionExample, getCleanPartTitle, getStoryWordBankPointBreakdown } from '../utils/sectionUtils';
 
 interface StudentExamPlayerProps {
   parts: ExamPart[];
@@ -530,35 +530,38 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
       const qPts = q.points ?? 0.5;
       let earned = isCorrect ? qPts : 0;
 
-      // Partial score for multi-item questions (listen-colour)
-      if (!isCorrect && q.type === 'listen-colour') {
+      // Score per coloring hotspot (each dot = question points / dots, or custom adjusted points)
+      if (q.type === 'listen-colour') {
         const items = q.listenColour?.items || [];
         const testItems = items.filter((it) => !it.isExample);
         if (testItems.length > 0) {
+          const breakdown = getListenColourPointBreakdown(items, qPts);
           const userMap = (userAnswers[idx] as Record<string, string>) || {};
-          const correctCount = testItems.filter((it) => isColorMatch(userMap[it.id], it.targetColor)).length;
-          if (correctCount > 0) {
-            earned = +((correctCount / testItems.length) * qPts).toFixed(2);
-          }
+          const sumEarned = testItems.reduce((acc, it) => {
+            return acc + (isColorMatch(userMap[it.id], it.targetColor) ? (breakdown.itemPointsMap[it.id] || 0) : 0);
+          }, 0);
+          earned = +(sumEarned).toFixed(3);
         }
       }
 
-      // Partial score for story-word-bank (câu này có bao nhiêu từ thì chia đều điểm từng từ đó)
+      // Partial score for story-word-bank (chia đều điểm từng từ hoặc theo điểm tùy chỉnh từng ô điền)
       if (q.type === 'story-word-bank') {
         const answersMap = q.storyBank?.answers || {};
         const testSlots = Object.keys(answersMap).filter((k) => k !== '0');
         if (testSlots.length > 0) {
+          const sbBreakdown = getStoryWordBankPointBreakdown(q.storyBank, qPts);
           const userMap = (userAnswers[idx] as Record<string, string>) || {};
-          const correctCount = testSlots.filter(
-            (k) => String(userMap[k] || '').trim().toLowerCase() === answersMap[k].trim().toLowerCase()
-          ).length;
-          earned = +((correctCount / testSlots.length) * qPts).toFixed(2);
+          const sumEarned = testSlots.reduce((acc, k) => {
+            const ok = String(userMap[k] || '').trim().toLowerCase() === answersMap[k].trim().toLowerCase();
+            return acc + (ok ? (sbBreakdown.slotPointsMap[k] || 0) : 0);
+          }, 0);
+          earned = +(sumEarned).toFixed(3);
         }
       }
 
       questionScores[idx] = earned;
 
-      if (isCorrect || earned >= qPts) totalQuestionsCorrect++;
+      if (isCorrect || earned >= qPts - 0.001) totalQuestionsCorrect++;
       totalEarnedPoints += earned;
 
       const pId = p.id;
@@ -566,22 +569,22 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
 
       if (sectionScores[sec]) {
         sectionScores[sec].questionCount += 1;
-        sectionScores[sec].earnedPoints = +(sectionScores[sec].earnedPoints + earned).toFixed(2);
-        if (isCorrect || earned >= qPts) {
+        sectionScores[sec].earnedPoints = +(sectionScores[sec].earnedPoints + earned).toFixed(3);
+        if (isCorrect || earned >= qPts - 0.001) {
           sectionScores[sec].correctCount += 1;
         }
       }
 
       if (partScores[pId]) {
         partScores[pId].questionCount += 1;
-        partScores[pId].earnedPoints = +(partScores[pId].earnedPoints + earned).toFixed(2);
-        if (isCorrect || earned >= qPts) {
+        partScores[pId].earnedPoints = +(partScores[pId].earnedPoints + earned).toFixed(3);
+        if (isCorrect || earned >= qPts - 0.001) {
           partScores[pId].correctCount += 1;
         }
       }
     });
 
-    totalEarnedPoints = +totalEarnedPoints.toFixed(2);
+    totalEarnedPoints = +totalEarnedPoints.toFixed(3);
     const maxExamPoints = +(
       parts.reduce((sum, p) => sum + (p.points || 0), 0) ||
       questions
@@ -3250,9 +3253,10 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                   const activeSlot = activeStorySlots[qIdx] || '1';
                   const words = storyBank?.words || [];
                   const correctAnswers = storyBank?.answers || {};
-                  const testSlots = Object.keys(correctAnswers).filter((k) => k !== '0');
                   const qPoints = q.points ?? 1.0;
-                  const pointPerWord = testSlots.length > 0 ? (qPoints / testSlots.length).toFixed(2) : '0.25';
+                  const sbBreakdown = getStoryWordBankPointBreakdown(storyBank, qPoints);
+                  const testSlots = sbBreakdown.slotKeys;
+                  const pointPerWord = testSlots.length > 0 ? formatPointsClean(qPoints / testSlots.length) : '0.25';
 
                   return (
                     <div className="space-y-5 pt-2">
@@ -3436,8 +3440,13 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         const correctCount = testSlots.filter(
                           (k) => String(currentAnswers[k] || '').trim().toLowerCase() === correctAnswers[k]?.trim().toLowerCase()
                         ).length;
-                        const earnedScore =
-                          testSlots.length > 0 ? +((correctCount / testSlots.length) * qPoints).toFixed(2) : qPoints;
+                        const earnedScore = +(
+                          testSlots.reduce((acc, k) => {
+                            const ok =
+                              String(currentAnswers[k] || '').trim().toLowerCase() === correctAnswers[k]?.trim().toLowerCase();
+                            return acc + (ok ? (sbBreakdown.slotPointsMap[k] || 0) : 0);
+                          }, 0)
+                        ).toFixed(3);
 
                         return (
                           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-2 shadow-xs">
@@ -3445,11 +3454,11 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                               <span className="font-black text-sm text-slate-900">
                                 Kết quả câu {qIdx + 1}:{' '}
                                 <span className="text-emerald-700 text-base">
-                                  {earnedScore} / {qPoints} điểm
+                                  {formatPointsClean(earnedScore)} / {formatPointsClean(qPoints)} điểm
                                 </span>
                               </span>
                               <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs border border-emerald-200">
-                                Đúng {correctCount}/{testSlots.length} từ ({pointPerWord}đ / mỗi từ đúng)
+                                Đúng {correctCount}/{testSlots.length} từ ({sbBreakdown.hasCustomPoints ? 'theo điểm từng từ' : `${pointPerWord}đ / mỗi từ đúng`})
                               </span>
                             </div>
 
@@ -3459,7 +3468,8 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                               </span>
                               {testSlots.map((k) => (
                                 <span key={k} className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-slate-800">
-                                  ({k}): <strong className="text-emerald-800">{correctAnswers[k]}</strong>
+                                  ({k}): <strong className="text-emerald-800">{correctAnswers[k]}</strong>{' '}
+                                  <span className="text-[10px] text-slate-500">({formatPointsClean(sbBreakdown.slotPointsMap[k] ?? 0)}đ)</span>
                                 </span>
                               ))}
                             </div>

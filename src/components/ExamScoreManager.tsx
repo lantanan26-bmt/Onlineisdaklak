@@ -10,7 +10,8 @@ import {
   GradeExamProfile
 } from '../types';
 import { findExamForStudent } from '../utils/gradeExamManager';
-import { isQuestionExample } from '../utils/sectionUtils';
+import { isQuestionExample, getStoryWordBankPointBreakdown } from '../utils/sectionUtils';
+import { getListenColourPointBreakdown, formatPointsClean, isColorMatch } from '../utils/cambridgeColours';
 
 const getPartSection = (p?: ExamPart): ExamSection => {
   if (p?.section) return p.section;
@@ -915,20 +916,22 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
             correctText = subChecks.map((s) => `${s.label}: ${s.correctVal}`).join(' • ');
           } else if (q.type === 'story-word-bank') {
             const answersMap = q.storyBank?.answers || {};
+            const sbBreakdown = getStoryWordBankPointBreakdown(q.storyBank, maxPts);
             const uMap = (rawAns && typeof rawAns === 'object' ? rawAns : {}) as Record<string, string>;
             const slots = Object.keys(answersMap).filter((k) => k !== '0').sort((a, b) => Number(a) - Number(b));
             slots.forEach((slot) => {
               const uVal = String(uMap[slot] || '').trim();
               const cVal = String(answersMap[slot] || '').trim();
+              const slotPts = sbBreakdown.slotPointsMap[slot] ?? 0;
               subChecks.push({
-                label: `Chỗ trống (${slot})`,
+                label: `Chỗ trống (${slot}) (${formatPointsClean(slotPts)}đ)`,
                 studentVal: uVal || '(Trống)',
                 correctVal: cVal,
                 ok: uVal.toLowerCase() === cVal.toLowerCase()
               });
             });
-            studentText = subChecks.map((s) => `(${s.label.replace('Chỗ trống ', '')}) ${s.studentVal}`).join(' • ') || 'Chưa điền';
-            correctText = subChecks.map((s) => `(${s.label.replace('Chỗ trống ', '')}) ${s.correctVal}`).join(' • ');
+            studentText = subChecks.map((s) => `${s.label.split(' ')[2] || ''} ${s.studentVal}`).join(' • ') || 'Chưa điền';
+            correctText = subChecks.map((s) => `${s.label.split(' ')[2] || ''} ${s.correctVal}`).join(' • ');
           } else if (q.type === 'connect-pairs') {
             const norm = (p: [string, string]) => (p[0] < p[1] ? `${p[0]} ↔ ${p[1]}` : `${p[1]} ↔ ${p[0]}`);
             const targetPairs = q.connectPairs?.pairs || [];
@@ -965,13 +968,16 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
             studentText = providedPairs.length > 0 ? providedPairs.map((p) => `${p[0]}→${p[1]}`).join(', ') : 'Chưa nối cặp nào';
             correctText = requiredPairs.map((p) => `${p[0]}→${p[1]}`).join(', ');
           } else if (q.type === 'listen-colour') {
-            const items = (q.listenColour?.items || []).filter((it) => !it.isExample);
+            const allItems = q.listenColour?.items || [];
+            const items = allItems.filter((it) => !it.isExample);
+            const lcBreakdown = getListenColourPointBreakdown(allItems, maxPts);
             const uMap = (rawAns && typeof rawAns === 'object' ? rawAns : {}) as Record<string, string>;
             items.forEach((it) => {
               const uColor = String(uMap[it.id] || '').trim();
-              const ok = uColor.toLowerCase() === String(it.targetColor || '').trim().toLowerCase();
+              const ok = isColorMatch(uColor, it.targetColor);
+              const dotPts = lcBreakdown.itemPointsMap[it.id] ?? 0;
               subChecks.push({
-                label: it.label,
+                label: `${it.label} (${formatPointsClean(dotPts)}đ)`,
                 studentVal: uColor || '(Chưa tô)',
                 correctVal: it.targetColorName ? `${it.targetColorName} (${it.targetColor})` : it.targetColor,
                 ok
