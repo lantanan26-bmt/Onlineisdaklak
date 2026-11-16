@@ -412,12 +412,14 @@ export async function fetchAppConfigFromCloud(): Promise<{
   schools: string[];
   activeExamId: string;
   branding?: AppBranding;
+  updatedAtMs?: number;
 } | null> {
   const path = 'app_config/main';
   try {
     const snap = await getDoc(doc(db, 'app_config', 'main'));
     if (!snap.exists()) return null;
     const data = snap.data();
+    const updatedAtMs = data.updatedAt?.toMillis ? data.updatedAt.toMillis() : 0;
     const hasBranding =
       typeof data.appName === 'string' ||
       typeof data.appSubtitle === 'string' ||
@@ -431,6 +433,7 @@ export async function fetchAppConfigFromCloud(): Promise<{
     return {
       schools: Array.isArray(data.schools) ? data.schools : [],
       activeExamId: typeof data.activeExamId === 'string' ? data.activeExamId : 'exam-grade-2',
+      updatedAtMs,
       branding: hasBranding
         ? {
             appName: typeof data.appName === 'string' && data.appName.trim() ? data.appName.trim() : 'iSMART LMS',
@@ -440,6 +443,7 @@ export async function fetchAppConfigFromCloud(): Promise<{
             logoWidth: Math.min(280, Math.max(24, Math.round(rawW))),
             logoHeight: Math.min(120, Math.max(24, Math.round(rawH))),
             logoFit: rawFit,
+            updatedAtMs,
           }
         : undefined,
     };
@@ -541,10 +545,16 @@ export async function saveGradeExamToCloud(exam: GradeExamProfile, ownerUid?: st
         compressedParts.map((p) => compressPartMedia(p, 580, 0.52, 70_000))
       );
     }
+    if (estimateByteSize(compressedParts) > 850_000) {
+      compressedParts = compressedParts.map((p) => ({
+        ...p,
+        audio: p.audio && p.audio.length > 220_000 ? '' : p.audio,
+      }));
+    }
     if (estimateByteSize(compressedParts) > 880_000) {
       compressedParts = compressedParts.map((p) => ({
         ...p,
-        audio: p.audio && p.audio.length > 350_000 ? '' : p.audio,
+        audio: p.audio && p.audio.startsWith('data:') ? '' : p.audio,
       }));
     }
 
@@ -554,9 +564,9 @@ export async function saveGradeExamToCloud(exam: GradeExamProfile, ownerUid?: st
         if (estimateByteSize(cq) > 650_000) {
           cq = await compressQuestionMedia(cq, 500, 0.48, 60_000);
         }
-        if (estimateByteSize(cq) > 850_000) {
+        if (estimateByteSize(cq) > 820_000) {
           cq = await compressQuestionMedia(cq, 380, 0.38, 40_000);
-          if (cq.audio && cq.audio.length > 350_000) {
+          if (cq.audio && cq.audio.length > 220_000) {
             cq = { ...cq, audio: '' };
           }
         }
@@ -569,24 +579,7 @@ export async function saveGradeExamToCloud(exam: GradeExamProfile, ownerUid?: st
     const existingSnap = await getDoc(doc(db, 'exams', examId));
     const prevBatchCount = existingSnap.exists() ? Number(existingSnap.data().batchCount || 0) : 0;
 
-    const examPayload = encodeForFirestore({
-      id: examId,
-      grade: (exam.grade || 'Khối 2').trim().slice(0, 40) || 'Khối 2',
-      className: (exam.className || 'Tất cả các lớp').trim().slice(0, 60),
-      title: (exam.title || 'Đề thi iSMART').trim().slice(0, 200) || 'Đề thi iSMART',
-      description: (exam.description || '').slice(0, 500),
-      examMinutes: Math.min(180, Math.max(1, Number(exam.examMinutes || 45))),
-      parts: compressedParts,
-      batchCount: batches.length,
-      isPublished: true,
-      ownerUid: sanitizeDocId(ownerUid || auth.currentUser?.uid || 'admin', 'admin'),
-      updatedAt: serverTimestamp(),
-    });
-
-    // Save exam profile document first
-    await setDoc(doc(db, 'exams', examId), examPayload);
-
-    // Save question batches in safe chunks (max 4 batches per WriteBatch to stay well under 10MB commit ceiling)
+    // Save question batches FIRST so exam profile never points to missing batches
     const BATCH_COMMIT_GROUP = 4;
     for (let start = 0; start < batches.length; start += BATCH_COMMIT_GROUP) {
       const batchWriter = writeBatch(db);
@@ -605,6 +598,26 @@ export async function saveGradeExamToCloud(exam: GradeExamProfile, ownerUid?: st
       }
       await batchWriter.commit();
     }
+
+    const rawMin = Number(exam.examMinutes);
+    const safeMinutes = Number.isFinite(rawMin) ? Math.min(180, Math.max(1, Math.round(rawMin))) : 45;
+
+    const examPayload = encodeForFirestore({
+      id: examId,
+      grade: (exam.grade || 'Khối 2').trim().slice(0, 40) || 'Khối 2',
+      className: (exam.className || 'Tất cả các lớp').trim().slice(0, 60),
+      title: (exam.title || 'Đề thi iSMART').trim().slice(0, 200) || 'Đề thi iSMART',
+      description: (exam.description || '').slice(0, 500),
+      examMinutes: safeMinutes,
+      parts: compressedParts,
+      batchCount: batches.length,
+      isPublished: true,
+      ownerUid: sanitizeDocId(ownerUid || auth.currentUser?.uid || 'admin', 'admin'),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Save exam profile metadata atomically after batches succeed
+    await setDoc(doc(db, 'exams', examId), examPayload);
 
     if (prevBatchCount > batches.length) {
       const delWriter = writeBatch(db);
@@ -655,7 +668,8 @@ export async function fetchPublishedExamsFromCloud(
 
     for (const examDoc of snap.docs) {
       const rawData = examDoc.data();
-      const cloudTs = rawData.updatedAt?.toMillis ? String(rawData.updatedAt.toMillis()) : '';
+      const cloudUpdatedAtMs = rawData.updatedAt?.toMillis ? rawData.updatedAt.toMillis() : 0;
+      const cloudTs = cloudUpdatedAtMs ? String(cloudUpdatedAtMs) : '';
       const data = decodeFromFirestore(rawData);
       const examId = data.id || examDoc.id;
       const cachedExam = cachedLocalExams.find((e) => e.id === examId);
@@ -663,19 +677,21 @@ export async function fetchPublishedExamsFromCloud(
       if (
         cachedExam &&
         cloudTs &&
-        cachedExam.updatedAt === cloudTs &&
+        (cachedExam.cloudSyncedTs === cloudTs || cachedExam.updatedAt === cloudTs) &&
         Array.isArray(cachedExam.questions) &&
         cachedExam.questions.length > 0
       ) {
         results.push({
           ...cachedExam,
-          grade: data.grade,
-          className: data.className,
-          title: data.title,
-          description: data.description,
+          grade: data.grade || cachedExam.grade,
+          className: data.className ?? cachedExam.className,
+          title: data.title || cachedExam.title,
+          description: data.description ?? cachedExam.description,
           examMinutes: Number(data.examMinutes || 45),
           parts: Array.isArray(data.parts) ? data.parts : cachedExam.parts,
-          updatedAt: cloudTs,
+          updatedAt: cachedExam.updatedAt || cloudTs,
+          updatedAtMs: cachedExam.updatedAtMs || cloudUpdatedAtMs,
+          cloudSyncedTs: cloudTs,
         });
         continue;
       }
@@ -706,7 +722,9 @@ export async function fetchPublishedExamsFromCloud(
         examMinutes: Number(data.examMinutes || 45),
         parts: Array.isArray(data.parts) ? data.parts : [],
         questions: mergedQuestions,
-        updatedAt: cloudTs || new Date().toISOString(),
+        updatedAt: cloudTs || new Date().toLocaleDateString('vi-VN'),
+        updatedAtMs: cloudUpdatedAtMs || 0,
+        cloudSyncedTs: cloudTs || undefined,
       });
     }
 
@@ -1075,6 +1093,20 @@ export async function saveTeachersToCloud(teachers: Teacher[]): Promise<void> {
   }
 }
 
+export async function deleteTeacherUsernameFromCloud(usernameRaw: string): Promise<void> {
+  const username = sanitizeDocId((usernameRaw || '').toLowerCase());
+  if (!username) return;
+  const path = `teacher_accounts/${username}`;
+  try {
+    if (isBootstrapAdminSignedIn()) {
+      await deleteDoc(doc(db, 'teacher_accounts', username, 'private', 'info')).catch(() => {});
+    }
+    await deleteDoc(doc(db, 'teacher_accounts', username));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 export async function deleteTeacherFromCloud(teacher: Teacher): Promise<void> {
   const username = sanitizeDocId(teacher.username.toLowerCase());
   const path = `teacher_accounts/${username}`;
@@ -1100,7 +1132,9 @@ export async function fetchTeachersForAdminFromCloud(): Promise<Teacher[] | null
 
     const results: Teacher[] = [];
     for (const d of snap.docs) {
-      const data = decodeFromFirestore(d.data());
+      const rawData = d.data();
+      const updatedAtMs = rawData.updatedAt?.toMillis ? rawData.updatedAt.toMillis() : 0;
+      const data = decodeFromFirestore(rawData);
       let email = '';
       let phone = '';
       let password = '';
@@ -1131,6 +1165,7 @@ export async function fetchTeachersForAdminFromCloud(): Promise<Teacher[] | null
         permissions: Array.isArray(data.permissions) ? (data.permissions as TeacherPermission[]) : [],
         isActive: data.isActive !== false,
         createdAt: data.createdAt || '',
+        updatedAtMs,
       });
     }
     return results;

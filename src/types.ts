@@ -254,6 +254,8 @@ export interface Teacher {
   permissions: TeacherPermission[];
   isActive: boolean;
   createdAt: string;
+  updatedAtMs?: number;
+  isCustom?: boolean;
 }
 
 export interface GradeExamProfile {
@@ -266,6 +268,9 @@ export interface GradeExamProfile {
   parts: ExamPart[];
   questions: Question[];
   updatedAt?: string;
+  updatedAtMs?: number;
+  cloudSyncedTs?: string;
+  isCustom?: boolean;
 }
 
 export interface AppBranding {
@@ -276,5 +281,6 @@ export interface AppBranding {
   logoWidth?: number;
   logoHeight?: number;
   logoFit?: 'contain' | 'cover' | 'fill';
+  updatedAtMs?: number;
 }
 

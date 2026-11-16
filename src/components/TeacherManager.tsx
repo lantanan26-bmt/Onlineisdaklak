@@ -249,10 +249,12 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
     if (editingTeacher) {
       // Update
       const nextPass = formData.password.trim();
+      const nowMs = Date.now();
       const updated = teachers.map((t) =>
         t.id === editingTeacher.id
           ? {
               ...t,
+              id: formData.id.trim() || t.id,
               name: formData.name.trim(),
               username: cleanUser,
               password: nextPass || t.password,
@@ -261,7 +263,9 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
               phone: formData.phone.trim(),
               assignedGrades: formData.assignedGrades,
               permissions: formData.permissions,
-              isActive: formData.isActive
+              isActive: formData.isActive,
+              updatedAtMs: nowMs,
+              isCustom: true
             }
           : t
       );
@@ -269,6 +273,7 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
       showToast(`✅ Đã lưu giáo viên ${formData.name.trim()} & toàn bộ phân quyền vĩnh viễn vào hệ thống!`, 'success');
     } else {
       // Create new
+      const nowMs = Date.now();
       const newTeacher: Teacher = {
         id: formData.id.trim() || `GV${Date.now().toString().slice(-4)}`,
         name: formData.name.trim(),
@@ -279,7 +284,9 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
         assignedGrades: formData.assignedGrades,
         permissions: formData.permissions,
         isActive: formData.isActive,
-        createdAt: new Date().toLocaleDateString('vi-VN')
+        createdAt: new Date().toLocaleDateString('vi-VN'),
+        updatedAtMs: nowMs,
+        isCustom: true
       };
       onUpdateTeachers([...teachers, newTeacher]);
       showToast(`✅ Đã thêm giáo viên ${newTeacher.name} & lưu phân quyền vĩnh viễn vào hệ thống!`, 'success');
@@ -293,7 +300,10 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
     const target = teachers.find((t) => t.id === teacherId);
     if (!target) return;
     const newStatus = !target.isActive;
-    const updated = teachers.map((t) => (t.id === teacherId ? { ...t, isActive: newStatus } : t));
+    const nowMs = Date.now();
+    const updated = teachers.map((t) =>
+      t.id === teacherId ? { ...t, isActive: newStatus, updatedAtMs: nowMs, isCustom: true } : t
+    );
     onUpdateTeachers(updated);
     showToast(
       newStatus

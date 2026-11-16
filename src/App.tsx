@@ -33,6 +33,18 @@ import { LanguageToggleButton } from './components/LanguageToggleButton';
 import { useLanguage } from './contexts/LanguageContext';
 import { canonicalSortParts } from './utils/sectionUtils';
 import { saveToStorage, loadFromStorage, getInitialSyncStorage } from './utils/storage';
+import {
+  SyncMeta,
+  createDefaultSyncMeta,
+  detectCustomTeachersComparedToDefaults,
+  detectDeletedDefaultExamIds,
+  detectDeletedDefaultTeacherUsernames,
+  detectModifiedExamIdsComparedToDefaults,
+  loadSyncMetaAsync,
+  loadSyncMetaSync,
+  normalizeTeacherKey,
+  persistSyncMeta,
+} from './utils/syncState';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
 import {
@@ -41,7 +53,7 @@ import {
   CloudSyncReport,
   deleteExamFromCloud,
   deleteStudentsFromCloud,
-  deleteTeacherFromCloud,
+  deleteTeacherUsernameFromCloud,
   fetchAllStudentsFromCloud,
   fetchAppConfigFromCloud,
   fetchCloudInventorySummary,
@@ -64,42 +76,70 @@ import {
 function mergeExamsList(
   local: GradeExamProfile[],
   cloud: GradeExamProfile[],
-  dirtyExamIds: Set<string>
+  meta: SyncMeta
 ): GradeExamProfile[] {
   if (!cloud || cloud.length === 0) return local;
+  const deletedSet = new Set(meta.deletedExamIds);
+  const dirtySet = new Set(meta.dirtyExamIds);
   const localMap = new Map(local.map((e) => [e.id, e]));
-  const merged = cloud.map((ce) => {
-    if (dirtyExamIds.has(ce.id) && localMap.has(ce.id)) {
-      return localMap.get(ce.id)!;
+
+  const filteredCloud = cloud.filter((ce) => !deletedSet.has(ce.id));
+  const cloudIds = new Set(filteredCloud.map((ce) => ce.id));
+
+  const merged = filteredCloud.map((ce) => {
+    const le = localMap.get(ce.id);
+    if (!le) return ce;
+    if (dirtySet.has(ce.id)) {
+      return le;
     }
-    return ce;
+    const localTs = le.updatedAtMs || 0;
+    const cloudTs = ce.updatedAtMs || 0;
+    if (localTs > 0 && (cloudTs === 0 || localTs > cloudTs + 1500)) {
+      return le;
+    }
+    if (le.isCustom && !ce.isCustom && cloudTs === 0) {
+      return le;
+    }
+    if (cloudTs > localTs + 1500) {
+      return ce;
+    }
+    return le.updatedAtMs ? le : ce;
   });
-  const cloudIds = new Set(cloud.map((ce) => ce.id));
-  const extraDirtyLocal = local.filter((le) => !cloudIds.has(le.id) && dirtyExamIds.has(le.id));
-  return [...extraDirtyLocal, ...merged];
+
+  // Preserve locally added / customized exams not yet present on Cloud (unless explicitly deleted)
+  const extraLocal = local.filter(
+    (le) =>
+      !cloudIds.has(le.id) &&
+      !deletedSet.has(le.id) &&
+      (dirtySet.has(le.id) || le.isCustom || (le.updatedAtMs || 0) > 0 || meta.hasCustomExams)
+  );
+  return [...extraLocal, ...merged];
 }
 
 function mergeStudentsList(
   local: Student[],
   cloud: Student[],
-  hasLocalEdits: boolean
+  hasLocalEdits: boolean,
+  deletedStudentIds: string[] = []
 ): Student[] {
   if (!cloud || cloud.length === 0) return local;
+  const deletedSet = new Set(deletedStudentIds.map((id) => id.toUpperCase()));
+  const filteredCloud = cloud.filter((cs) => !deletedSet.has(cs.id.toUpperCase()));
   const localMap = new Map(local.map((s) => [s.id, s]));
   if (!hasLocalEdits) {
-    const cloudMap = new Map(cloud.map((cs) => [cs.id, cs]));
-    const mergedCloud = cloud.map((cs) => {
+    const cloudMap = new Map(filteredCloud.map((cs) => [cs.id, cs]));
+    const mergedCloud = filteredCloud.map((cs) => {
       const ls = localMap.get(cs.id);
       if (ls && ls.submittedAt != null && cs.submittedAt == null) {
         return { ...cs, ...ls };
       }
       return cs;
     });
-    const unsyncedLocalScored = local.filter((ls) => !cloudMap.has(ls.id) && ls.submittedAt != null);
+    const unsyncedLocalScored = local.filter((ls) => !cloudMap.has(ls.id) && ls.submittedAt != null && !deletedSet.has(ls.id.toUpperCase()));
     return [...mergedCloud, ...unsyncedLocalScored];
   }
   const map = new Map<string, Student>(local.map((s) => [s.id, s]));
-  for (const cs of cloud) {
+  for (const cs of filteredCloud) {
     const ls = map.get(cs.id);
     if (!ls || (cs.submittedAt != null && ls.submittedAt == null)) {
       map.set(cs.id, cs);
@@ -111,24 +151,62 @@ function mergeStudentsList(
 function mergeTeachersList(
   local: Teacher[],
   cloud: Teacher[],
-  hasLocalEdits: boolean
+  meta: SyncMeta
 ): Teacher[] {
   if (!cloud || cloud.length === 0) return local;
-  const localMap = new Map(local.map((t) => [t.username.toLowerCase(), t]));
-  const mergedCloud = cloud.map((ct) => {
-    const lt = localMap.get(ct.username.toLowerCase());
+  const deletedKeys = new Set(meta.deletedTeacherUsernames.map(normalizeTeacherKey));
+
+  // If local teachers have unsaved manual changes, NEVER let Cloud overwrite them
+  if (meta.dirtyTeachers) {
+    return local;
+  }
+
+  const localMaxTs = Math.max(
+    meta.teachersUpdatedAtMs || 0,
+    ...local.map((t) => t.updatedAtMs || 0)
+  );
+  const cloudMaxTs = Math.max(...cloud.map((t) => t.updatedAtMs || 0));
+
+  if (localMaxTs > 0 && (cloudMaxTs === 0 || localMaxTs > cloudMaxTs + 1500)) {
+    return local;
+  }
+
+  const filteredCloud = cloud.filter((ct) => !deletedKeys.has(normalizeTeacherKey(ct.username)));
+  const localByKey = new Map<string, Teacher>();
+  for (const lt of local) {
+    localByKey.set(normalizeTeacherKey(lt.username), lt);
+  }
+
+  const mergedCloud = filteredCloud.map((ct) => {
+    const ctKey = normalizeTeacherKey(ct.username);
+    const lt = localByKey.get(ctKey) || local.find((t) => t.id === ct.id);
     if (!lt) return ct;
+
+    const ltTs = lt.updatedAtMs || 0;
+    const ctTs = ct.updatedAtMs || 0;
+    if (ltTs > 0 && (ctTs === 0 || ltTs > ctTs + 1500)) {
+      return lt;
+    }
+
     return {
       ...ct,
       password: ct.password || lt.password || '',
       passHash: ct.passHash || lt.passHash,
       email: ct.email || lt.email,
       phone: ct.phone || lt.phone,
+      isCustom: lt.isCustom || ct.isCustom,
     };
   });
-  if (!hasLocalEdits) return mergedCloud;
-  const cloudKeys = new Set(cloud.map((c) => c.username.toLowerCase()));
-  const extraLocal = local.filter((lt) => !cloudKeys.has(lt.username.toLowerCase()));
+
+  const cloudKeySet = new Set(filteredCloud.map((c) => normalizeTeacherKey(c.username)));
+  const cloudIdSet = new Set(filteredCloud.map((c) => c.id));
+  const extraLocal = local.filter(
+    (lt) =>
+      !cloudKeySet.has(normalizeTeacherKey(lt.username)) &&
+      !cloudIdSet.has(lt.id) &&
+      !deletedKeys.has(normalizeTeacherKey(lt.username)) &&
+      (lt.isCustom || (lt.updatedAtMs || 0) > 0 || meta.hasCustomTeachers)
+  );
   return [...mergedCloud, ...extraLocal];
 }
 
@@ -187,10 +265,54 @@ export default function App() {
   const questions = activeExam.questions || [];
   const examMinutes = activeExam.examMinutes || 15;
 
+  // Persistent sync metadata & Firebase Cloud Auth state (survives reloads & app updates)
+  const syncMetaRef = React.useRef<SyncMeta>(loadSyncMetaSync());
+  const updateSyncMetaState = useCallback((updater: (prev: SyncMeta) => SyncMeta): SyncMeta => {
+    const next = updater(syncMetaRef.current);
+    syncMetaRef.current = next;
+    persistSyncMeta(next);
+    return next;
+  }, []);
+
+  const markConfigDirty = useCallback((updatedAtMs = Date.now()) => {
+    updateSyncMetaState((prev) => ({
+      ...prev,
+      dirtyConfig: true,
+      configUpdatedAtMs: Math.max(prev.configUpdatedAtMs || 0, updatedAtMs),
+    }));
+  }, [updateSyncMetaState]);
+
+  const markExamDirty = useCallback((examId: string) => {
+    updateSyncMetaState((prev) => ({
+      ...prev,
+      dirtyExams: true,
+      hasCustomExams: true,
+      dirtyExamIds: Array.from(new Set([...prev.dirtyExamIds, examId])),
+      deletedExamIds: prev.deletedExamIds.filter((id) => id !== examId),
+    }));
+  }, [updateSyncMetaState]);
+
+  const markTeachersDirty = useCallback((removedUsernames: string[] = [], activeUsernames: string[] = []) => {
+    const activeSet = new Set(activeUsernames.map(normalizeTeacherKey));
+    const removedKeys = removedUsernames.map(normalizeTeacherKey).filter((k) => k && !activeSet.has(k));
+    updateSyncMetaState((prev) => ({
+      ...prev,
+      dirtyTeachers: true,
+      teachersUpdatedAtMs: Date.now(),
+      hasCustomTeachers: true,
+      deletedTeacherUsernames: Array.from(
+        new Set([
+          ...prev.deletedTeacherUsernames.map(normalizeTeacherKey).filter((k) => !activeSet.has(k)),
+          ...removedKeys,
+        ])
+      ),
+    }));
+  }, [updateSyncMetaState]);
+
   // Setters that update the active grade exam inside gradeExams
   const setParts = useCallback((newParts: ExamPart[] | ((prev: ExamPart[]) => ExamPart[])) => {
-    dirtyRef.current.exams = true;
-    dirtyExamIdsRef.current.add(activeExamId);
+    const nowMs = Date.now();
+    markExamDirty(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
@@ -198,17 +320,19 @@ export default function App() {
           return {
             ...e,
             parts: canonicalSortParts(resolved),
-            updatedAt: new Date().toLocaleDateString('vi-VN')
+            updatedAt: new Date().toLocaleDateString('vi-VN'),
+            updatedAtMs: nowMs,
+            isCustom: true,
           };
         }
         return e;
       })
     );
-  }, [activeExamId]);
+  }, [activeExamId, markExamDirty]);
 
   const setQuestions = useCallback((newQuestions: Question[] | ((prev: Question[]) => Question[])) => {
-    dirtyRef.current.exams = true;
-    dirtyExamIdsRef.current.add(activeExamId);
+    const nowMs = Date.now();
+    markExamDirty(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
@@ -216,27 +340,35 @@ export default function App() {
           return {
             ...e,
             questions: resolved,
-            updatedAt: new Date().toLocaleDateString('vi-VN')
+            updatedAt: new Date().toLocaleDateString('vi-VN'),
+            updatedAtMs: nowMs,
+            isCustom: true,
           };
         }
         return e;
       })
     );
-  }, [activeExamId]);
+  }, [activeExamId, markExamDirty]);
 
   const setExamMinutes = useCallback((newMinutes: number | ((prev: number) => number)) => {
-    dirtyRef.current.exams = true;
-    dirtyExamIdsRef.current.add(activeExamId);
+    const nowMs = Date.now();
+    markExamDirty(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
           const resolved = typeof newMinutes === 'function' ? newMinutes(e.examMinutes) : newMinutes;
-          return { ...e, examMinutes: resolved };
+          return {
+            ...e,
+            examMinutes: resolved,
+            updatedAt: new Date().toLocaleDateString('vi-VN'),
+            updatedAtMs: nowMs,
+            isCustom: true,
+          };
         }
         return e;
       })
     );
-  }, [activeExamId]);
+  }, [activeExamId, markExamDirty]);
 
   const [schools, setSchools] = useState<string[]>(() => {
     return getInitialSyncStorage<string[]>('ismart_schools', getInitialSchools());
@@ -274,7 +406,19 @@ export default function App() {
     let active = true;
     const hydrateFromIndexedDB = async () => {
       try {
-        const [savedGradeExams, savedActiveExamId, savedParts, savedQuestions, savedSchools, savedStudents, savedMinutes, savedPin, savedTeachers, savedBranding] = await Promise.all([
+        const [
+          savedGradeExams,
+          savedActiveExamId,
+          savedParts,
+          savedQuestions,
+          savedSchools,
+          savedStudents,
+          _savedMinutes,
+          savedPin,
+          savedTeachers,
+          savedBranding,
+          savedSyncMeta,
+        ] = await Promise.all([
           loadFromStorage<GradeExamProfile[] | null>('ismart_grade_exam_profiles', null),
           loadFromStorage<string | null>('ismart_active_grade_exam_id', null),
           loadFromStorage<ExamPart[] | null>('ismart_exam_parts', null),
@@ -284,22 +428,25 @@ export default function App() {
           loadFromStorage<number | null>('ismart_exam_minutes', null),
           loadFromStorage<string | null>('ismart_admin_pin', null),
           loadFromStorage<Teacher[] | null>('ismart_teachers', null),
-          loadFromStorage<AppBranding | null>('ismart_app_branding', null)
+          loadFromStorage<AppBranding | null>('ismart_app_branding', null),
+          loadSyncMetaAsync(),
         ]);
+
+        let activeMeta = syncMetaRef.current.initialized ? syncMetaRef.current : savedSyncMeta;
 
         let hydratedExams = savedGradeExams && Array.isArray(savedGradeExams) && savedGradeExams.length > 0 ? savedGradeExams : null;
         let hydratedActiveExamId = savedActiveExamId;
         let hydratedSchools = savedSchools && Array.isArray(savedSchools) && savedSchools.length > 0 ? savedSchools : null;
-        let hydratedStudents = savedStudents && Array.isArray(savedStudents) && savedStudents.length > 0 ? savedStudents : null;
-        let hydratedTeachers = savedTeachers && Array.isArray(savedTeachers) && savedTeachers.length > 0 ? savedTeachers : null;
+        let hydratedStudents = savedStudents && Array.isArray(savedStudents) ? savedStudents : null;
+        let hydratedTeachers = savedTeachers && Array.isArray(savedTeachers) ? savedTeachers : null;
         let hydratedPin = savedPin;
         let hydratedBranding = savedBranding && typeof savedBranding === 'object' && savedBranding.appName ? savedBranding : null;
 
         const hasLocalSavedState = Boolean(
           hydratedExams ||
           (savedQuestions && Array.isArray(savedQuestions) && savedQuestions.length > 0) ||
-          hydratedStudents ||
-          hydratedTeachers ||
+          (hydratedStudents && hydratedStudents.length > 0) ||
+          (hydratedTeachers && (hydratedTeachers.length > 0 || activeMeta.hasCustomTeachers)) ||
           (typeof window !== 'undefined' && (
             localStorage.getItem('ismart_grade_exam_profiles') ||
             localStorage.getItem('ismart_students') ||
@@ -352,7 +499,64 @@ export default function App() {
           }
         }
 
+        // First-upgrade legacy protection: if user had already saved manual edits in IndexedDB/localStorage
+        // before SyncMeta existed, detect and stamp them immediately so Cloud boot sync never overwrites them.
+        if (!activeMeta.initialized) {
+          const nowMs = Date.now();
+          let migratedMeta = createDefaultSyncMeta();
+          migratedMeta.initialized = true;
+
+          if (hydratedTeachers !== null) {
+            const hasCustomT = detectCustomTeachersComparedToDefaults(hydratedTeachers);
+            const deletedDefT = detectDeletedDefaultTeacherUsernames(hydratedTeachers);
+            if (hasCustomT || deletedDefT.length > 0) {
+              migratedMeta.hasCustomTeachers = true;
+              migratedMeta.dirtyTeachers = true;
+              migratedMeta.teachersUpdatedAtMs = nowMs;
+              migratedMeta.deletedTeacherUsernames = deletedDefT;
+              hydratedTeachers = hydratedTeachers.map((t) => ({
+                ...t,
+                updatedAtMs: t.updatedAtMs || nowMs,
+                isCustom: true,
+              }));
+            }
+          }
+
+          if (hydratedExams && hydratedExams.length > 0) {
+            const modIds = detectModifiedExamIdsComparedToDefaults(hydratedExams);
+            const delDefExams = detectDeletedDefaultExamIds(hydratedExams);
+            if (modIds.length > 0 || delDefExams.length > 0) {
+              migratedMeta.hasCustomExams = true;
+              migratedMeta.dirtyExams = true;
+              migratedMeta.dirtyExamIds = modIds;
+              migratedMeta.deletedExamIds = delDefExams;
+              const modSet = new Set(modIds);
+              hydratedExams = hydratedExams.map((ex) =>
+                modSet.has(ex.id)
+                  ? { ...ex, updatedAtMs: ex.updatedAtMs || nowMs, isCustom: true }
+                  : ex
+              );
+            }
+          }
+
+          if (hydratedBranding) {
+            const brandingCustomized =
+              hydratedBranding.appName !== DEFAULT_APP_BRANDING.appName ||
+              hydratedBranding.appSubtitle !== DEFAULT_APP_BRANDING.appSubtitle ||
+              Boolean(hydratedBranding.logoUrl) ||
+              (hydratedBranding.logoText && hydratedBranding.logoText !== DEFAULT_APP_BRANDING.logoText);
+            if (brandingCustomized) {
+              migratedMeta.dirtyConfig = true;
+              migratedMeta.configUpdatedAtMs = hydratedBranding.updatedAtMs || nowMs;
+            }
+          }
+
+          activeMeta = migratedMeta;
+          persistSyncMeta(activeMeta);
+        }
+
         if (!active) return;
+        syncMetaRef.current = activeMeta;
 
         if (hydratedExams && hydratedExams.length > 0) {
           setGradeExams(hydratedExams);
@@ -361,7 +565,7 @@ export default function App() {
           setGradeExams(
             defaults.map((e) =>
               e.id === 'exam-grade-2'
-                ? { ...e, parts: canonicalSortParts(savedParts), questions: savedQuestions }
+                ? { ...e, parts: canonicalSortParts(savedParts), questions: savedQuestions, updatedAtMs: Date.now(), isCustom: true }
                 : e
             )
           );
@@ -377,7 +581,7 @@ export default function App() {
         if (hydratedStudents && hydratedStudents.length > 0) {
           setStudents(hydratedStudents);
         }
-        if (hydratedTeachers && hydratedTeachers.length > 0) {
+        if (hydratedTeachers && (hydratedTeachers.length > 0 || activeMeta.hasCustomTeachers)) {
           setTeachers(hydratedTeachers);
         }
         if (hydratedPin) {
@@ -408,8 +612,6 @@ export default function App() {
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [cloudInventory, setCloudInventory] = useState<CloudInventorySummary | null>(null);
   const [lastSyncReport, setLastSyncReport] = useState<CloudSyncReport | null>(null);
-  const dirtyRef = React.useRef({ config: false, exams: false, students: false, teachers: false });
-  const dirtyExamIdsRef = React.useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -418,8 +620,8 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // On startup after IndexedDB hydration, automatically connect to Firebase Cloud across ALL accounts,
-  // pull all exams, students, teachers, and config, and auto-seed empty Cloud collections silently.
+  // On startup after IndexedDB hydration, safely read Cloud updates WITHOUT overwriting local manual edits
+  // and NEVER seeding demo defaults onto Cloud from an unauthenticated guest boot.
   useEffect(() => {
     if (!isHydrated) return;
     let active = true;
@@ -436,64 +638,42 @@ export default function App() {
         if (!health.reachable) return;
 
         const [cloudConfig, cloudExams, cloudStudents, cloudTeachers, inv] = await Promise.all([
-          fetchAppConfigFromCloud().catch(() => null),
-          fetchPublishedExamsFromCloud(gradeExams).catch(() => null),
-          fetchAllStudentsFromCloud().catch(() => null),
-          fetchTeachersForAdminFromCloud().catch(() => null),
+          fetchAppConfigFromCloud().catch(() => undefined),
+          fetchPublishedExamsFromCloud(gradeExams).catch(() => undefined),
+          fetchAllStudentsFromCloud().catch(() => undefined),
+          fetchTeachersForAdminFromCloud().catch(() => undefined),
           fetchCloudInventorySummary().catch(() => null),
         ]);
         if (!active) return;
 
         if (inv) setCloudInventory(inv);
+        const meta = syncMetaRef.current;
 
-        if (cloudConfig && !dirtyRef.current.config) {
-          if (cloudConfig.schools && cloudConfig.schools.length > 0) {
-            setSchools(cloudConfig.schools);
-          }
-          if (cloudConfig.activeExamId) {
-            setActiveExamId(cloudConfig.activeExamId);
-          }
-          if (cloudConfig.branding) {
-            setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+        if (cloudConfig && !meta.dirtyConfig) {
+          const cloudCfgTs = cloudConfig.updatedAtMs || 0;
+          const localCfgTs = meta.configUpdatedAtMs || 0;
+          if (localCfgTs === 0 || (cloudCfgTs > 0 && cloudCfgTs > localCfgTs + 1500)) {
+            if (cloudConfig.schools && cloudConfig.schools.length > 0) {
+              setSchools(cloudConfig.schools);
+            }
+            if (cloudConfig.activeExamId) {
+              setActiveExamId(cloudConfig.activeExamId);
+            }
+            if (cloudConfig.branding) {
+              setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+            }
           }
         }
         if (cloudExams && cloudExams.length > 0) {
-          setGradeExams((prev) => mergeExamsList(prev, cloudExams, dirtyExamIdsRef.current));
+          setGradeExams((prev) => mergeExamsList(prev, cloudExams, syncMetaRef.current));
         }
         if (cloudStudents && cloudStudents.length > 0) {
-          setStudents((prev) => mergeStudentsList(prev, cloudStudents, dirtyRef.current.students));
+          setStudents((prev) =>
+            mergeStudentsList(prev, cloudStudents, meta.dirtyStudents, meta.deletedStudentIds)
+          );
         }
         if (cloudTeachers && cloudTeachers.length > 0) {
-          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, dirtyRef.current.teachers));
-        }
-
-        // If any collection is still empty on Cloud (e.g., fresh Firebase or new Netlify/Cloudflare deploy),
-        // silently populate ONLY the empty categories so all devices stay synchronized immediately.
-        const needSeedExams = !cloudExams || cloudExams.length === 0;
-        const needSeedStudents = !cloudStudents || cloudStudents.length === 0;
-        const needSeedTeachers = !cloudTeachers || cloudTeachers.length === 0;
-        const needSeedConfig = !cloudConfig;
-
-        if (needSeedConfig || needSeedExams || needSeedStudents || needSeedTeachers) {
-          const report = await syncAllDataToCloud({
-            schools,
-            activeExamId,
-            gradeExams,
-            students,
-            teachers,
-            branding: needSeedConfig ? appBranding : undefined,
-            ownerUid: cloudUser?.uid || 'auto-portal-boot',
-            cloudEmail: cloudUser?.email || null,
-            canSyncConfig: needSeedConfig || needSeedExams,
-            canSyncExams: needSeedExams,
-            canSyncStudents: needSeedStudents,
-            canSyncTeachers: needSeedTeachers,
-          }).catch(() => null);
-          if (active && report) {
-            setLastSyncReport(report);
-            const refreshedInv = await fetchCloudInventorySummary().catch(() => null);
-            if (active && refreshedInv) setCloudInventory(refreshedInv);
-          }
+          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, syncMetaRef.current));
         }
       } catch {
         if (active) setCloudHealth('offline');
@@ -543,66 +723,169 @@ export default function App() {
         const canManageStudents = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students');
         const canManageTeachers = currentUserRole === 'admin';
 
-        // 1. Pull latest Cloud state for non-dirty categories
+        let configReadOk = false;
+        let examsReadOk = false;
+        let studentsReadOk = false;
+        let teachersReadOk = false;
+
+        // 1. Pull latest Cloud state carefully (never treating read failures as empty collections)
         const [cloudConfig, cloudExams, cloudStudents, cloudTeachers] = await Promise.all([
-          !dirtyRef.current.config && inv.schoolsCount > 0 ? fetchAppConfigFromCloud().catch(() => null) : Promise.resolve(null),
-          inv.examsCount > 0 ? fetchPublishedExamsFromCloud(gradeExams).catch(() => null) : Promise.resolve(null),
-          inv.studentsCount > 0 ? fetchAllStudentsFromCloud().catch(() => null) : Promise.resolve(null),
-          inv.teachersCount > 0 ? fetchTeachersForAdminFromCloud().catch(() => null) : Promise.resolve(null),
+          fetchAppConfigFromCloud()
+            .then((r) => {
+              configReadOk = true;
+              return r;
+            })
+            .catch(() => null),
+          fetchPublishedExamsFromCloud(gradeExams)
+            .then((r) => {
+              examsReadOk = true;
+              return r;
+            })
+            .catch(() => null),
+          fetchAllStudentsFromCloud()
+            .then((r) => {
+              studentsReadOk = true;
+              return r;
+            })
+            .catch(() => null),
+          fetchTeachersForAdminFromCloud()
+            .then((r) => {
+              teachersReadOk = true;
+              return r;
+            })
+            .catch(() => null),
         ]);
         if (!active) return;
 
-        if (cloudConfig && !dirtyRef.current.config) {
-          if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
-          if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
-          if (cloudConfig.branding) {
-            setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+        const meta = syncMetaRef.current;
+
+        if (cloudConfig && !meta.dirtyConfig) {
+          const cloudCfgTs = cloudConfig.updatedAtMs || 0;
+          const localCfgTs = meta.configUpdatedAtMs || 0;
+          if (localCfgTs === 0 || (cloudCfgTs > 0 && cloudCfgTs > localCfgTs + 1500)) {
+            if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
+            if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
+            if (cloudConfig.branding) {
+              setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+            }
           }
         }
         if (cloudExams && cloudExams.length > 0) {
-          setGradeExams((prev) => mergeExamsList(prev, cloudExams, dirtyExamIdsRef.current));
+          setGradeExams((prev) => mergeExamsList(prev, cloudExams, meta));
         }
         if (cloudStudents && cloudStudents.length > 0) {
-          setStudents((prev) => mergeStudentsList(prev, cloudStudents, dirtyRef.current.students));
+          setStudents((prev) =>
+            mergeStudentsList(prev, cloudStudents, meta.dirtyStudents, meta.deletedStudentIds)
+          );
         }
         if (cloudTeachers && cloudTeachers.length > 0) {
-          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, dirtyRef.current.teachers));
+          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, meta));
         }
 
-        // 2. Push ONLY categories that are empty on Cloud or have pending local edits
-        const needPushConfig = (canEditExam || canManageStudents) && (inv.schoolsCount === 0 || dirtyRef.current.config);
-        const needPushExams = canEditExam && (inv.examsCount === 0 || dirtyRef.current.exams || dirtyExamIdsRef.current.size > 0);
-        const needPushStudents = canManageStudents && (inv.studentsCount === 0 || dirtyRef.current.students);
-        const needPushTeachers = canManageTeachers && (inv.teachersCount === 0 || dirtyRef.current.teachers);
+        // 2. Flush any pending deletions (tombstones) first
+        const remainingDeletedExams: string[] = [...meta.deletedExamIds];
+        if (canEditExam && meta.deletedExamIds.length > 0) {
+          for (const exId of meta.deletedExamIds) {
+            try {
+              await deleteExamFromCloud(exId);
+              const idx = remainingDeletedExams.indexOf(exId);
+              if (idx >= 0) remainingDeletedExams.splice(idx, 1);
+            } catch {
+              // Keep in tombstone list for next retry
+            }
+          }
+        }
 
-        if (needPushConfig || needPushExams || needPushStudents || needPushTeachers) {
+        const remainingDeletedTeachers: string[] = [...meta.deletedTeacherUsernames];
+        if (canManageTeachers && meta.deletedTeacherUsernames.length > 0) {
+          for (const uname of meta.deletedTeacherUsernames) {
+            try {
+              await deleteTeacherUsernameFromCloud(uname);
+              const idx = remainingDeletedTeachers.indexOf(uname);
+              if (idx >= 0) remainingDeletedTeachers.splice(idx, 1);
+            } catch {
+              // Keep in tombstone list for next retry
+            }
+          }
+        }
+
+        // 3. Push ONLY dirty/newer local data or verified-empty Cloud collections
+        const cloudExamMap = new Map((cloudExams || []).map((ce) => [ce.id, ce]));
+        const examsNeedingPush = canEditExam
+          ? gradeExams.filter((le) => {
+              if (meta.dirtyExamIds.includes(le.id)) return true;
+              const ce = cloudExamMap.get(le.id);
+              if (!ce && examsReadOk && (!cloudExams || cloudExams.length === 0 || le.isCustom || (le.updatedAtMs || 0) > 0)) {
+                return true;
+              }
+              if (ce && (le.updatedAtMs || 0) > (ce.updatedAtMs || 0) + 1500) {
+                return true;
+              }
+              return false;
+            })
+          : [];
+
+        const cloudTeachersMaxTs = Math.max(0, ...(cloudTeachers || []).map((t) => t.updatedAtMs || 0));
+        const localTeachersMaxTs = Math.max(meta.teachersUpdatedAtMs || 0, ...teachers.map((t) => t.updatedAtMs || 0));
+        const needPushTeachers =
+          canManageTeachers &&
+          (meta.dirtyTeachers ||
+            (localTeachersMaxTs > 0 && (cloudTeachersMaxTs === 0 || localTeachersMaxTs > cloudTeachersMaxTs + 1500)) ||
+            (teachersReadOk && (!cloudTeachers || cloudTeachers.length === 0) && !meta.hasCustomTeachers && teachers.length > 0));
+
+        const localCfgNewer = meta.configUpdatedAtMs > 0 && (!cloudConfig?.updatedAtMs || meta.configUpdatedAtMs > cloudConfig.updatedAtMs + 1500);
+        const needPushConfig =
+          (canEditExam || canManageStudents) &&
+          (meta.dirtyConfig || localCfgNewer || (configReadOk && !cloudConfig));
+
+        const needPushStudents =
+          canManageStudents &&
+          (meta.dirtyStudents || (studentsReadOk && (!cloudStudents || cloudStudents.length === 0) && students.length > 0));
+
+        if (needPushConfig || examsNeedingPush.length > 0 || needPushStudents || needPushTeachers) {
           const report = await syncAllDataToCloud({
             schools,
             activeExamId,
-            gradeExams,
+            gradeExams: examsNeedingPush,
             students,
             teachers,
             branding: currentUserRole === 'admin' ? appBranding : undefined,
             ownerUid: cloudUser?.uid || `portal-${currentUserRole}`,
             cloudEmail: cloudUser?.email || null,
             canSyncConfig: needPushConfig,
-            canSyncExams: needPushExams,
+            canSyncExams: examsNeedingPush.length > 0,
             canSyncStudents: needPushStudents,
             canSyncTeachers: needPushTeachers,
           });
           if (!active) return;
           setLastSyncReport(report);
           if (report.errors.length === 0) {
-            if (needPushConfig) dirtyRef.current.config = false;
-            if (needPushExams) {
-              dirtyRef.current.exams = false;
-              dirtyExamIdsRef.current.clear();
-            }
-            if (needPushStudents) dirtyRef.current.students = false;
-            if (needPushTeachers) dirtyRef.current.teachers = false;
+            const pushedExamIdSet = new Set(examsNeedingPush.map((e) => e.id));
+            updateSyncMetaState((prev) => {
+              const remainingDirtyExams = prev.dirtyExamIds.filter((id) => !pushedExamIdSet.has(id));
+              return {
+                ...prev,
+                dirtyConfig: needPushConfig ? false : prev.dirtyConfig,
+                dirtyExams: remainingDirtyExams.length > 0,
+                dirtyExamIds: remainingDirtyExams,
+                deletedExamIds: remainingDeletedExams,
+                dirtyStudents: needPushStudents ? false : prev.dirtyStudents,
+                dirtyTeachers: needPushTeachers ? false : prev.dirtyTeachers,
+                deletedTeacherUsernames: remainingDeletedTeachers,
+              };
+            });
           }
           const refreshed = await fetchCloudInventorySummary().catch(() => null);
           if (active && refreshed) setCloudInventory(refreshed);
+        } else if (
+          remainingDeletedExams.length !== meta.deletedExamIds.length ||
+          remainingDeletedTeachers.length !== meta.deletedTeacherUsernames.length
+        ) {
+          updateSyncMetaState((prev) => ({
+            ...prev,
+            deletedExamIds: remainingDeletedExams,
+            deletedTeacherUsernames: remainingDeletedTeachers,
+          }));
         }
       } catch {
         // Keep working locally if Cloud is temporarily unreachable
@@ -616,14 +899,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser, currentUserRole, currentTeacher?.username, isHydrated]);
 
-  // Automatic debounced background save for exam/config edits when Admin or authorized Teacher edits
+  // Automatic debounced background save for exam, teacher & config edits when Admin or authorized Teacher edits
   useEffect(() => {
     if (!isHydrated) return;
     if (currentUserRole !== 'admin' && currentUserRole !== 'teacher') return;
 
-    const hasDirtyConfig = dirtyRef.current.config;
-    const hasDirtyExams = dirtyRef.current.exams || dirtyExamIdsRef.current.size > 0;
-    if (!hasDirtyConfig && !hasDirtyExams) return;
+    const meta = syncMetaRef.current;
+    const hasDirtyConfig = meta.dirtyConfig;
+    const hasDirtyExams = meta.dirtyExams || meta.dirtyExamIds.length > 0 || meta.deletedExamIds.length > 0;
+    const hasDirtyTeachers = meta.dirtyTeachers || meta.deletedTeacherUsernames.length > 0;
+    if (!hasDirtyConfig && !hasDirtyExams && !hasDirtyTeachers) return;
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setCloudHealth('offline');
@@ -631,30 +916,79 @@ export default function App() {
     }
 
     const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
+    const canManageTeachers = currentUserRole === 'admin';
     const canEditConfig =
       currentUserRole === 'admin' || canEditExam || !!currentTeacher?.permissions.includes('manage_students');
 
     const timer = window.setTimeout(async () => {
       setIsCloudSyncing(true);
       try {
-        if (hasDirtyConfig && canEditConfig) {
+        const snapshotMeta = syncMetaRef.current;
+        if (snapshotMeta.dirtyConfig && canEditConfig) {
           await saveAppConfigToCloud(schools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined);
-          dirtyRef.current.config = false;
+          updateSyncMetaState((prev) => ({ ...prev, dirtyConfig: false }));
         }
-        if (hasDirtyExams && canEditExam) {
+
+        if ((snapshotMeta.dirtyExams || snapshotMeta.dirtyExamIds.length > 0) && canEditExam) {
           const targetIds =
-            dirtyExamIdsRef.current.size > 0 ? Array.from(dirtyExamIdsRef.current) : [activeExamId];
+            snapshotMeta.dirtyExamIds.length > 0 ? snapshotMeta.dirtyExamIds : [activeExamId];
+          const syncedIds = new Set<string>();
           for (const exId of targetIds) {
             const examObj = gradeExams.find((e) => e.id === exId);
             if (examObj) {
               await saveGradeExamToCloud(examObj, cloudUser?.uid || `portal-${currentUserRole}`);
-              dirtyExamIdsRef.current.delete(exId);
+              syncedIds.add(exId);
             }
           }
-          if (dirtyExamIdsRef.current.size === 0) {
-            dirtyRef.current.exams = false;
+          if (syncedIds.size > 0) {
+            updateSyncMetaState((prev) => {
+              const remaining = prev.dirtyExamIds.filter((id) => !syncedIds.has(id));
+              return { ...prev, dirtyExamIds: remaining, dirtyExams: remaining.length > 0 };
+            });
           }
         }
+
+        if (snapshotMeta.deletedExamIds.length > 0 && canEditExam) {
+          const deletedOk = new Set<string>();
+          for (const delId of snapshotMeta.deletedExamIds) {
+            try {
+              await deleteExamFromCloud(delId);
+              deletedOk.add(delId);
+            } catch {
+              // keep for retry
+            }
+          }
+          if (deletedOk.size > 0) {
+            updateSyncMetaState((prev) => ({
+              ...prev,
+              deletedExamIds: prev.deletedExamIds.filter((id) => !deletedOk.has(id)),
+            }));
+          }
+        }
+
+        if (snapshotMeta.dirtyTeachers && canManageTeachers) {
+          await saveTeachersToCloud(teachers);
+          updateSyncMetaState((prev) => ({ ...prev, dirtyTeachers: false }));
+        }
+
+        if (snapshotMeta.deletedTeacherUsernames.length > 0 && canManageTeachers) {
+          const deletedUsers = new Set<string>();
+          for (const uname of snapshotMeta.deletedTeacherUsernames) {
+            try {
+              await deleteTeacherUsernameFromCloud(uname);
+              deletedUsers.add(uname);
+            } catch {
+              // keep for retry
+            }
+          }
+          if (deletedUsers.size > 0) {
+            updateSyncMetaState((prev) => ({
+              ...prev,
+              deletedTeacherUsernames: prev.deletedTeacherUsernames.filter((u) => !deletedUsers.has(u)),
+            }));
+          }
+        }
+
         setCloudHealth('connected');
         setLastSavedTime(
           new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -670,7 +1004,7 @@ export default function App() {
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradeExams, schools, activeExamId, appBranding, currentUserRole, currentTeacher?.username, isHydrated, cloudUser]);
+  }, [gradeExams, schools, activeExamId, appBranding, teachers, currentUserRole, currentTeacher?.username, isHydrated, cloudUser]);
 
   useEffect(() => {
     try {
@@ -906,7 +1240,7 @@ export default function App() {
 
   // Grade Exam Management Handlers
   const handleSelectGradeExam = (examId: string) => {
-    dirtyRef.current.config = true;
+    markConfigDirty();
     setActiveExamId(examId);
     saveToStorage('ismart_active_grade_exam_id', examId);
     const target = gradeExams.find((e) => e.id === examId);
@@ -965,7 +1299,8 @@ export default function App() {
       ];
     }
 
-    const newId = `exam-${newExamData.grade.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString().slice(-4)}`;
+    const nowMs = Date.now();
+    const newId = `exam-${newExamData.grade.toLowerCase().replace(/\s+/g, '-')}-${nowMs.toString().slice(-4)}`;
     const newProfile: GradeExamProfile = {
       id: newId,
       grade: newExamData.grade,
@@ -975,12 +1310,13 @@ export default function App() {
       examMinutes: newExamData.examMinutes || 15,
       parts: initialParts,
       questions: initialQuestions,
-      updatedAt: new Date().toLocaleDateString('vi-VN')
+      updatedAt: new Date().toLocaleDateString('vi-VN'),
+      updatedAtMs: nowMs,
+      isCustom: true,
     };
 
-    dirtyRef.current.exams = true;
-    dirtyRef.current.config = true;
-    dirtyExamIdsRef.current.add(newId);
+    markExamDirty(newId);
+    markConfigDirty(nowMs);
     setGradeExams((prev) => [newProfile, ...prev]);
     setActiveExamId(newId);
     saveToStorage('ismart_active_grade_exam_id', newId);
@@ -996,7 +1332,8 @@ export default function App() {
     const source = gradeExams.find((e) => e.id === sourceExamId);
     if (!source) return;
 
-    const newId = `exam-${targetGrade.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString().slice(-4)}`;
+    const nowMs = Date.now();
+    const newId = `exam-${targetGrade.toLowerCase().replace(/\s+/g, '-')}-${nowMs.toString().slice(-4)}`;
     const duplicated: GradeExamProfile = {
       id: newId,
       grade: targetGrade,
@@ -1006,12 +1343,13 @@ export default function App() {
       examMinutes: source.examMinutes,
       parts: JSON.parse(JSON.stringify(source.parts)),
       questions: JSON.parse(JSON.stringify(source.questions)),
-      updatedAt: new Date().toLocaleDateString('vi-VN')
+      updatedAt: new Date().toLocaleDateString('vi-VN'),
+      updatedAtMs: nowMs,
+      isCustom: true,
     };
 
-    dirtyRef.current.exams = true;
-    dirtyRef.current.config = true;
-    dirtyExamIdsRef.current.add(newId);
+    markExamDirty(newId);
+    markConfigDirty(nowMs);
     setGradeExams((prev) => [duplicated, ...prev]);
     setActiveExamId(newId);
     saveToStorage('ismart_active_grade_exam_id', newId);
@@ -1019,11 +1357,19 @@ export default function App() {
   };
 
   const handleUpdateGradeExamMeta = (examId: string, patch: Partial<GradeExamProfile>) => {
-    dirtyRef.current.exams = true;
-    dirtyExamIdsRef.current.add(examId);
+    const nowMs = Date.now();
+    markExamDirty(examId);
     setGradeExams((prev) =>
       prev.map((e) =>
-        e.id === examId ? { ...e, ...patch, updatedAt: new Date().toLocaleDateString('vi-VN') } : e
+        e.id === examId
+          ? {
+              ...e,
+              ...patch,
+              updatedAt: new Date().toLocaleDateString('vi-VN'),
+              updatedAtMs: nowMs,
+              isCustom: true,
+            }
+          : e
       )
     );
   };
@@ -1034,17 +1380,33 @@ export default function App() {
       return;
     }
     const filtered = gradeExams.filter((e) => e.id !== examId);
-    dirtyExamIdsRef.current.delete(examId);
+    updateSyncMetaState((prev) => {
+      const remainingDirty = prev.dirtyExamIds.filter((id) => id !== examId);
+      return {
+        ...prev,
+        hasCustomExams: true,
+        dirtyExams: remainingDirty.length > 0,
+        dirtyExamIds: remainingDirty,
+        deletedExamIds: Array.from(new Set([...prev.deletedExamIds, examId])),
+      };
+    });
     setGradeExams(filtered);
     if (activeExamId === examId) {
       const nextId = filtered[0].id;
-      dirtyRef.current.config = true;
+      markConfigDirty();
       setActiveExamId(nextId);
       saveToStorage('ismart_active_grade_exam_id', nextId);
     }
-    deleteExamFromCloud(examId).catch((err) => {
-      showToast(`Xóa đề thi trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-    });
+    deleteExamFromCloud(examId)
+      .then(() => {
+        updateSyncMetaState((prev) => ({
+          ...prev,
+          deletedExamIds: prev.deletedExamIds.filter((id) => id !== examId),
+        }));
+      })
+      .catch((err) => {
+        showToast(`Xóa đề thi trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+      });
     showToast('Đã xóa đề thi và cập nhật Cloud!', 'info');
   };
 
@@ -1085,14 +1447,20 @@ export default function App() {
       if (cloudExams && cloudExams.length > 0) setGradeExams(cloudExams);
       if (cloudStudents && cloudStudents.length > 0) setStudents(cloudStudents);
       if (cloudTeachers && cloudTeachers.length > 0) {
-        setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, false));
+        const cleanMeta = createDefaultSyncMeta();
+        cleanMeta.initialized = true;
+        setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, cleanMeta));
       }
 
       const inv = await fetchCloudInventorySummary();
       setCloudInventory(inv);
       setCloudHealth('connected');
-      dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
-      dirtyExamIdsRef.current.clear();
+      updateSyncMetaState(() => ({
+        ...createDefaultSyncMeta(),
+        initialized: true,
+        hasCustomExams: Boolean(cloudExams && cloudExams.length > 0),
+        hasCustomTeachers: Boolean(cloudTeachers && cloudTeachers.length > 0),
+      }));
       showToast(
         `⬇️ Đã tải từ Cloud: ${cloudExams?.length || 0} đề thi, ${cloudStudents?.length || 0} học sinh, ${cloudTeachers?.length || 0} giáo viên!`,
         'success'
@@ -1108,15 +1476,30 @@ export default function App() {
   const handleManualSaveAndSync = async () => {
     setIsSaving(true);
     setIsCloudSyncing(true);
+    const nowMs = Date.now();
     try {
+      const stampedExams = gradeExams.map((e) => ({
+        ...e,
+        updatedAtMs: e.updatedAtMs || nowMs,
+        isCustom: true,
+      }));
+      const stampedTeachers = teachers.map((t) => ({
+        ...t,
+        updatedAtMs: t.updatedAtMs || nowMs,
+        isCustom: true,
+      }));
+
+      setGradeExams(stampedExams);
+      setTeachers(stampedTeachers);
+
       await Promise.all([
-        saveToStorage('ismart_grade_exam_profiles', gradeExams),
+        saveToStorage('ismart_grade_exam_profiles', stampedExams),
         saveToStorage('ismart_active_grade_exam_id', activeExamId),
         saveToStorage('ismart_exam_parts', parts),
         saveToStorage('ismart_questions', questions),
         saveToStorage('ismart_schools', schools),
         saveToStorage('ismart_students', students),
-        saveToStorage('ismart_teachers', teachers),
+        saveToStorage('ismart_teachers', stampedTeachers),
         saveToStorage('ismart_exam_minutes', examMinutes),
         saveToStorage('ismart_admin_pin', adminPin),
         saveToStorage('ismart_app_branding', appBranding)
@@ -1126,7 +1509,19 @@ export default function App() {
       setLastSavedTime(nowStr);
 
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        dirtyRef.current = { config: true, exams: true, students: true, teachers: true };
+        updateSyncMetaState((prev) => ({
+          ...prev,
+          dirtyConfig: true,
+          configUpdatedAtMs: nowMs,
+          dirtyExams: true,
+          dirtyExamIds: stampedExams.map((e) => e.id),
+          hasCustomExams: true,
+          dirtyStudents: true,
+          studentsUpdatedAtMs: nowMs,
+          dirtyTeachers: true,
+          teachersUpdatedAtMs: nowMs,
+          hasCustomTeachers: true,
+        }));
         setCloudHealth('offline');
         showToast(`💾 Đang mất mạng — đã lưu tạm trên máy (${nowStr}) và sẽ tự đẩy Cloud khi có mạng!`, 'warn');
         return;
@@ -1135,20 +1530,48 @@ export default function App() {
       const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
       const canManageStudents = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students');
       const canResetScores = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('reset_scores');
+      const canManageTeachers = currentUserRole === 'admin';
+
+      const curMeta = syncMetaRef.current;
+      const remainingDeletedExams: string[] = [...curMeta.deletedExamIds];
+      if (canEditExam && curMeta.deletedExamIds.length > 0) {
+        for (const delId of curMeta.deletedExamIds) {
+          try {
+            await deleteExamFromCloud(delId);
+            const i = remainingDeletedExams.indexOf(delId);
+            if (i >= 0) remainingDeletedExams.splice(i, 1);
+          } catch {
+            // keep in tombstone
+          }
+        }
+      }
+
+      const remainingDeletedTeachers: string[] = [...curMeta.deletedTeacherUsernames];
+      if (canManageTeachers && curMeta.deletedTeacherUsernames.length > 0) {
+        for (const uname of curMeta.deletedTeacherUsernames) {
+          try {
+            await deleteTeacherUsernameFromCloud(uname);
+            const i = remainingDeletedTeachers.indexOf(uname);
+            if (i >= 0) remainingDeletedTeachers.splice(i, 1);
+          } catch {
+            // keep in tombstone
+          }
+        }
+      }
 
       const report = await syncAllDataToCloud({
         schools,
         activeExamId,
-        gradeExams,
+        gradeExams: stampedExams,
         students,
-        teachers,
+        teachers: stampedTeachers,
         branding: currentUserRole === 'admin' ? appBranding : undefined,
         ownerUid: cloudUser?.uid || `portal-${currentUserRole}`,
         cloudEmail: cloudUser?.email || null,
         canSyncConfig: currentUserRole === 'admin' || canEditExam || canManageStudents,
         canSyncExams: canEditExam,
         canSyncStudents: canManageStudents || canResetScores,
-        canSyncTeachers: currentUserRole === 'admin',
+        canSyncTeachers: canManageTeachers,
       });
       setLastSyncReport(report);
       setCloudHealth('connected');
@@ -1157,15 +1580,34 @@ export default function App() {
       if (inv) setCloudInventory(inv);
 
       if (report.errors.length === 0) {
-        dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
-        dirtyExamIdsRef.current.clear();
+        updateSyncMetaState((prev) => ({
+          ...prev,
+          dirtyConfig: !(currentUserRole === 'admin' || canEditExam || canManageStudents) ? prev.dirtyConfig : false,
+          configUpdatedAtMs: nowMs,
+          dirtyExams: canEditExam ? false : prev.dirtyExams,
+          dirtyExamIds: canEditExam ? [] : prev.dirtyExamIds,
+          deletedExamIds: remainingDeletedExams,
+          hasCustomExams: true,
+          dirtyStudents: (canManageStudents || canResetScores) ? false : prev.dirtyStudents,
+          dirtyTeachers: canManageTeachers ? false : prev.dirtyTeachers,
+          teachersUpdatedAtMs: canManageTeachers ? nowMs : prev.teachersUpdatedAtMs,
+          deletedTeacherUsernames: remainingDeletedTeachers,
+          hasCustomTeachers: true,
+        }));
         showToast(
           `☁️ Đã lưu Firebase Cloud: ${report.examsSaved} bài thi (${report.examImagesCount} ảnh), ${report.studentsSaved} HS (${report.scoredStudentsCount} có điểm), ${report.teachersSaved} GV lúc ${nowStr}!`,
           'success'
         );
       } else {
+        updateSyncMetaState((prev) => ({
+          ...prev,
+          dirtyExams: canEditExam || prev.dirtyExams,
+          dirtyTeachers: canManageTeachers || prev.dirtyTeachers,
+          deletedExamIds: remainingDeletedExams,
+          deletedTeacherUsernames: remainingDeletedTeachers,
+        }));
         showToast(
-          `⚠️ Đã lưu trên máy, nhưng đồng bộ Cloud bị lỗi: ${report.errors[0]}`,
+          `⚠️ Đã lưu an toàn trên máy, nhưng đồng bộ Cloud bị lỗi: ${report.errors[0]}`,
           'error'
         );
       }
@@ -1213,8 +1655,7 @@ export default function App() {
   // Apply parsed snapshot object to state + IndexedDB + auto-sync Cloud
   const handleApplyFullSnapshot = async (parsed: any) => {
     if (Array.isArray(parsed)) {
-      dirtyRef.current.exams = true;
-      dirtyExamIdsRef.current.add(activeExamId);
+      markExamDirty(activeExamId);
       setQuestions(parsed);
       await saveToStorage('ismart_questions', parsed);
       showToast(`Đã khôi phục ${parsed.length} câu hỏi và tự động đồng bộ lên Firebase Cloud!`, 'success');
@@ -1225,6 +1666,7 @@ export default function App() {
       return;
     }
 
+    const nowMs = Date.now();
     let nextExams = gradeExams;
     let nextActiveExamId = activeExamId;
     let nextSchools = schools;
@@ -1232,14 +1674,23 @@ export default function App() {
     let nextTeachers = teachers;
 
     if (Array.isArray(parsed.gradeExams) && parsed.gradeExams.length > 0) {
-      nextExams = parsed.gradeExams;
-      dirtyRef.current.exams = true;
-      parsed.gradeExams.forEach((ex: GradeExamProfile) => dirtyExamIdsRef.current.add(ex.id));
+      nextExams = parsed.gradeExams.map((ex: GradeExamProfile) => ({
+        ...ex,
+        updatedAtMs: ex.updatedAtMs || nowMs,
+        isCustom: true,
+      }));
+      updateSyncMetaState((prev) => ({
+        ...prev,
+        dirtyExams: true,
+        hasCustomExams: true,
+        dirtyExamIds: Array.from(new Set([...prev.dirtyExamIds, ...nextExams.map((ex) => ex.id)])),
+        deletedExamIds: [],
+      }));
       setGradeExams(nextExams);
       await saveToStorage('ismart_grade_exam_profiles', nextExams);
       if (parsed.activeExamId) {
         nextActiveExamId = parsed.activeExamId;
-        dirtyRef.current.config = true;
+        markConfigDirty(nowMs);
         setActiveExamId(nextActiveExamId);
         await saveToStorage('ismart_active_grade_exam_id', nextActiveExamId);
       }
@@ -1255,19 +1706,23 @@ export default function App() {
     }
     if (Array.isArray(parsed.schools)) {
       nextSchools = parsed.schools;
-      dirtyRef.current.config = true;
+      markConfigDirty(nowMs);
       setSchools(nextSchools);
       await saveToStorage('ismart_schools', nextSchools);
     }
     if (Array.isArray(parsed.students)) {
       nextStudents = parsed.students;
-      dirtyRef.current.students = true;
+      updateSyncMetaState((prev) => ({ ...prev, dirtyStudents: true, studentsUpdatedAtMs: nowMs }));
       setStudents(nextStudents);
       await saveToStorage('ismart_students', nextStudents);
     }
     if (Array.isArray(parsed.teachers)) {
-      nextTeachers = parsed.teachers;
-      dirtyRef.current.teachers = true;
+      nextTeachers = parsed.teachers.map((t: Teacher) => ({
+        ...t,
+        updatedAtMs: t.updatedAtMs || nowMs,
+        isCustom: true,
+      }));
+      markTeachersDirty([], nextTeachers.map((t) => t.username));
       setTeachers(nextTeachers);
       await saveToStorage('ismart_teachers', nextTeachers);
     }
@@ -1282,9 +1737,9 @@ export default function App() {
     }
     let nextBranding = appBranding;
     if (parsed.branding && typeof parsed.branding === 'object' && parsed.branding.appName) {
-      nextBranding = { ...DEFAULT_APP_BRANDING, ...parsed.branding };
+      nextBranding = { ...DEFAULT_APP_BRANDING, ...parsed.branding, updatedAtMs: nowMs };
       if (currentUserRole === 'admin') {
-        dirtyRef.current.config = true;
+        markConfigDirty(nowMs);
       }
       setAppBranding(nextBranding);
       await saveToStorage('ismart_app_branding', nextBranding);
@@ -1307,8 +1762,14 @@ export default function App() {
       .then((report) => {
         setLastSyncReport(report);
         if (report.errors.length === 0) {
-          dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
-          dirtyExamIdsRef.current.clear();
+          updateSyncMetaState((prev) => ({
+            ...prev,
+            dirtyConfig: false,
+            dirtyExams: false,
+            dirtyExamIds: [],
+            dirtyStudents: false,
+            dirtyTeachers: currentUserRole === 'admin' ? false : prev.dirtyTeachers,
+          }));
         }
       })
       .catch(() => {});
@@ -1451,7 +1912,8 @@ export default function App() {
       const cloudStudents = await fetchAllStudentsFromCloud();
       if (cloudStudents && cloudStudents.length > 0) {
         setStudents((prev) => {
-          const finalList = mergeStudentsList(prev, cloudStudents, false);
+          const meta = syncMetaRef.current;
+          const finalList = mergeStudentsList(prev, cloudStudents, meta.dirtyStudents, meta.deletedStudentIds);
           saveToStorage('ismart_students', finalList);
           return finalList;
         });
@@ -1673,12 +2135,12 @@ export default function App() {
     });
 
     if (studentData.school && !schools.includes(studentData.school)) {
-      dirtyRef.current.config = true;
+      markConfigDirty();
       setSchools((prev) => [...prev, studentData.school]);
     }
 
     syncStudentsBatchToCloud([syncedStudentRecord]).catch((err) => {
-      dirtyRef.current.students = true;
+      updateSyncMetaState((prev) => ({ ...prev, dirtyStudents: true, studentsUpdatedAtMs: Date.now() }));
       showToast(`Đã lưu điểm trên máy, chưa đẩy Cloud: ${formatCloudError(err)}`, 'warn');
     });
 
@@ -1697,23 +2159,24 @@ export default function App() {
       showToast('Chỉ Quản trị viên (Admin) mới có quyền thay đổi Logo & Tên hệ thống!', 'warn');
       return;
     }
-    setAppBranding(nextBranding);
-    await saveToStorage('ismart_app_branding', nextBranding);
+    const nowMs = Date.now();
+    const stampedBranding: AppBranding = { ...nextBranding, updatedAtMs: nowMs };
+    setAppBranding(stampedBranding);
+    markConfigDirty(nowMs);
+    await saveToStorage('ismart_app_branding', stampedBranding);
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      dirtyRef.current.config = true;
       showToast('Đã lưu Logo & Tên hệ thống trên máy (sẽ tự đẩy Cloud khi có mạng)!', 'info');
       return;
     }
 
     setIsCloudSyncing(true);
     try {
-      await saveAppConfigToCloud(schools, activeExamId, nextBranding);
-      dirtyRef.current.config = false;
+      await saveAppConfigToCloud(schools, activeExamId, stampedBranding);
+      updateSyncMetaState((prev) => ({ ...prev, dirtyConfig: false, configUpdatedAtMs: nowMs }));
       setCloudHealth('connected');
-      showToast(customToast || `✅ Đã cập nhật Logo & Tên "${nextBranding.appName}" và đồng bộ Cloud!`, 'success');
+      showToast(customToast || `✅ Đã cập nhật Logo & Tên "${stampedBranding.appName}" và đồng bộ Cloud!`, 'success');
     } catch (err) {
-      dirtyRef.current.config = true;
       showToast(`Đã lưu trên máy, đồng bộ Cloud bị lỗi: ${formatCloudError(err)}`, 'warn');
     } finally {
       setIsCloudSyncing(false);
@@ -2561,11 +3024,16 @@ export default function App() {
             schools={schools}
             students={students}
             onSchoolsChange={(newSchools) => {
+              const nowMs = Date.now();
               setSchools(newSchools);
-              saveAppConfigToCloud(newSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined).catch((err) => {
-                dirtyRef.current.config = true;
-                showToast(`Lưu DS trường lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-              });
+              markConfigDirty(nowMs);
+              saveAppConfigToCloud(newSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined)
+                .then(() => {
+                  updateSyncMetaState((prev) => ({ ...prev, dirtyConfig: false, configUpdatedAtMs: nowMs }));
+                })
+                .catch((err) => {
+                  showToast(`Lưu DS trường lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                });
             }}
             onStudentsChange={(newStudents) => {
               const prevIds = new Set(students.map((s) => s.id));
@@ -2576,17 +3044,39 @@ export default function App() {
                 return !old || JSON.stringify(old) !== JSON.stringify(ns);
               });
               setStudents(newStudents);
+              saveToStorage('ismart_students', newStudents);
+              updateSyncMetaState((prev) => ({
+                ...prev,
+                dirtyStudents: true,
+                studentsUpdatedAtMs: Date.now(),
+                deletedStudentIds: Array.from(
+                  new Set([
+                    ...prev.deletedStudentIds.filter((id) => !nextIds.has(id)),
+                    ...removedIds,
+                  ])
+                ),
+              }));
               if (changed.length > 0) {
-                syncStudentsBatchToCloud(changed).catch((err) => {
-                  dirtyRef.current.students = true;
-                  showToast(`Đồng bộ học sinh lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                });
+                syncStudentsBatchToCloud(changed)
+                  .then(() => {
+                    updateSyncMetaState((prev) => ({ ...prev, dirtyStudents: false }));
+                  })
+                  .catch((err) => {
+                    showToast(`Đồng bộ học sinh lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                  });
               }
               if (removedIds.length > 0) {
-                deleteStudentsFromCloud(removedIds).catch((err) => {
-                  dirtyRef.current.students = true;
-                  showToast(`Xóa học sinh trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                });
+                deleteStudentsFromCloud(removedIds)
+                  .then(() => {
+                    const removedSet = new Set(removedIds);
+                    updateSyncMetaState((prev) => ({
+                      ...prev,
+                      deletedStudentIds: prev.deletedStudentIds.filter((id) => !removedSet.has(id)),
+                    }));
+                  })
+                  .catch((err) => {
+                    showToast(`Xóa học sinh trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                  });
               }
             }}
             onQuickLogin={handleQuickLoginFromTable}
@@ -2596,12 +3086,24 @@ export default function App() {
                 'Khôi phục danh sách học sinh mẫu?',
                 'Danh sách sẽ được đặt lại theo các trường và học sinh mẫu.',
                 () => {
+                  const nowMs = Date.now();
                   const initSchools = getInitialSchools();
                   const initStudents = getInitialStudents();
+                  markConfigDirty(nowMs);
+                  updateSyncMetaState((prev) => ({
+                    ...prev,
+                    dirtyStudents: true,
+                    studentsUpdatedAtMs: nowMs,
+                    deletedStudentIds: [],
+                  }));
                   setSchools(initSchools);
                   setStudents(initStudents);
-                  saveAppConfigToCloud(initSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined).catch(() => {});
-                  syncStudentsBatchToCloud(initStudents).catch(() => {});
+                  saveAppConfigToCloud(initSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined)
+                    .then(() => updateSyncMetaState((prev) => ({ ...prev, dirtyConfig: false })))
+                    .catch(() => {});
+                  syncStudentsBatchToCloud(initStudents)
+                    .then(() => updateSyncMetaState((prev) => ({ ...prev, dirtyStudents: false })))
+                    .catch(() => {});
                   showToast('Đã khôi phục danh sách học sinh mẫu và đồng bộ Cloud!');
                 }
               );
@@ -2634,7 +3136,7 @@ export default function App() {
               saveToStorage('ismart_students', newStudents);
               if (resetIds.length > 0) {
                 resetStudentsScoreInCloud(resetIds).catch((err) => {
-                  dirtyRef.current.students = true;
+                  updateSyncMetaState((prev) => ({ ...prev, dirtyStudents: true, studentsUpdatedAtMs: Date.now() }));
                   showToast(`Xóa điểm trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
                 });
               }
@@ -2649,15 +3151,42 @@ export default function App() {
           <TeacherManager
             teachers={teachers}
             onUpdateTeachers={(newTeachers) => {
-              const nextUsernames = new Set(newTeachers.map((t) => t.username.toLowerCase()));
-              const removedTeachers = teachers.filter((t) => !nextUsernames.has(t.username.toLowerCase()));
-              setTeachers(newTeachers);
-              saveToStorage('ismart_teachers', newTeachers);
-              saveTeachersToCloud(newTeachers).catch((err) => {
-                dirtyRef.current.teachers = true;
-                showToast(`Lưu danh sách GV lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-              });
-              removedTeachers.forEach((rt) => deleteTeacherFromCloud(rt).catch(() => {}));
+              const nowMs = Date.now();
+              const nextKeys = new Set(newTeachers.map((t) => normalizeTeacherKey(t.username)));
+              const removedTeachers = teachers.filter(
+                (t) => !nextKeys.has(normalizeTeacherKey(t.username))
+              );
+              const removedUsernames = removedTeachers.map((t) => t.username);
+              const stampedTeachers = newTeachers.map((t) => ({
+                ...t,
+                updatedAtMs: t.updatedAtMs || nowMs,
+                isCustom: true,
+              }));
+
+              setTeachers(stampedTeachers);
+              saveToStorage('ismart_teachers', stampedTeachers);
+              markTeachersDirty(
+                removedUsernames,
+                stampedTeachers.map((t) => t.username)
+              );
+
+              Promise.all([
+                saveTeachersToCloud(stampedTeachers),
+                ...removedTeachers.map((rt) => deleteTeacherUsernameFromCloud(rt.username)),
+              ])
+                .then(() => {
+                  const removedKeySet = new Set(removedUsernames.map(normalizeTeacherKey));
+                  updateSyncMetaState((prev) => ({
+                    ...prev,
+                    dirtyTeachers: false,
+                    deletedTeacherUsernames: prev.deletedTeacherUsernames.filter(
+                      (u) => !removedKeySet.has(normalizeTeacherKey(u))
+                    ),
+                  }));
+                })
+                .catch((err) => {
+                  showToast(`Đã lưu trên máy, đồng bộ danh sách GV lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                });
             }}
             showToast={showToast}
             openConfirm={openConfirm}
@@ -2734,8 +3263,18 @@ export default function App() {
             onUploadBackupJSON={handleUploadBackupJSON}
             onPartsChange={setParts}
             onQuestionsChange={setQuestions}
-            onSchoolsChange={setSchools}
-            onStudentsChange={setStudents}
+            onSchoolsChange={(nextSchools) => {
+              markConfigDirty();
+              setSchools(nextSchools);
+            }}
+            onStudentsChange={(nextStudents) => {
+              updateSyncMetaState((prev) => ({
+                ...prev,
+                dirtyStudents: true,
+                studentsUpdatedAtMs: Date.now(),
+              }));
+              setStudents(nextStudents);
+            }}
             onExamMinutesChange={setExamMinutes}
             onAdminPinChange={setAdminPin}
             onEnterStandaloneStudentPortal={handleEnterStandaloneStudentPortal}

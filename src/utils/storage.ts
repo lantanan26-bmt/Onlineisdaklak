@@ -29,21 +29,35 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+const IDB_MARKER_FLAG = '__idbOnly';
+
 /**
  * Saves a value into IndexedDB and attempts to mirror to localStorage if size permits.
  */
 export async function saveToStorage<T>(key: string, value: T): Promise<void> {
   // 1. Save to IndexedDB (virtually unlimited quota for large images)
+  let idbSaved = false;
   try {
     const db = await openDatabase();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.put(value, key);
-      req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
-      tx.oncomplete = () => db.close();
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error || new Error('IndexedDB transaction aborted'));
+      };
     });
+    idbSaved = true;
   } catch (err) {
     console.warn(`[Storage] Failed to save key "${key}" to IndexedDB:`, err);
   }
@@ -53,6 +67,18 @@ export async function saveToStorage<T>(key: string, value: T): Promise<void> {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // LocalStorage quota exceeded (common with large images); IndexedDB handles it.
+    // Remove stale older cache so getInitialSyncStorage never serves outdated data.
+    if (idbSaved) {
+      try {
+        localStorage.setItem(key, JSON.stringify({ [IDB_MARKER_FLAG]: true, updatedAtMs: Date.now() }));
+      } catch {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          // ignore
+        }
+      }
+    }
   }
 }
 
@@ -83,10 +109,13 @@ export async function loadFromStorage<T>(key: string, defaultValue: T): Promise<
   try {
     const localVal = localStorage.getItem(key);
     if (localVal !== null) {
-      const parsed = JSON.parse(localVal) as T;
+      const parsed = JSON.parse(localVal) as any;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed[IDB_MARKER_FLAG]) {
+        return defaultValue;
+      }
       // Asynchronously migrate to IndexedDB for safety
-      saveToStorage(key, parsed).catch(() => {});
-      return parsed;
+      saveToStorage(key, parsed as T).catch(() => {});
+      return parsed as T;
     }
   } catch {
     // ignore
@@ -102,7 +131,11 @@ export function getInitialSyncStorage<T>(key: string, fallback: T): T {
   try {
     const item = localStorage.getItem(key);
     if (item !== null) {
-      return JSON.parse(item) as T;
+      const parsed = JSON.parse(item) as any;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed[IDB_MARKER_FLAG]) {
+        return fallback;
+      }
+      return parsed as T;
     }
   } catch {
     // ignore
