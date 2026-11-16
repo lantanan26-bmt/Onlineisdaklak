@@ -681,6 +681,12 @@ const EXACT_MAP: Record<string, string> = {
   'Đáp án đúng:': 'Correct answer:',
   'Các cặp đúng:': 'Correct pairs:',
   'Xóa tất cả đường nối của em': 'Clear all my lines',
+  'Hoàn tác nét vừa nối': 'Undo Last Line',
+  'Nhấn điểm thứ nhất rồi điểm thứ hai để nối. Bấm nút ✕ trên đường nối hoặc trên điểm để xóa nối sai và nối lại:':
+    'Click dot 1 then dot 2 to connect. Click ✕ on a line or dot to delete & reconnect:',
+  'Bấm để xóa đường nối này và nối lại': 'Click to delete this line and reconnect',
+  'Các cặp em đã nối (bấm ✕ để xóa nối lại):': 'Your Connected Pairs (click ✕ to remove & reconnect):',
+  'Xóa cặp nối này để nối lại': 'Remove this pair to reconnect',
   'Nhấn vào điểm thứ nhất rồi nhấn vào điểm thứ hai để nối đường kẻ:':
     'Click a first dot then click a second dot to draw a line:',
   'Gõ chữ/từ cần điền trực tiếp vào các ô chữ nhật trên ảnh:':
@@ -2032,6 +2038,14 @@ const PATTERN_RULES: PatternRule[] = [
   [/^Phương án\s+([A-Z0-9]+)$/i, (_, l) => `Option ${l}`],
   [/^★ VÍ DỤ \(EXAMPLE\):\s*(.+?)\s*➔\s*(.+)$/i, (_, a, b) => `★ EXAMPLE: ${a} ➔ ${b}`],
   [/^Điểm "(.+?)" là câu ví dụ mẫu đã được nối sẵn!$/i, (_, a) => `"${a}" is a pre-connected example dot!`],
+  [/^Đã xóa đường nối\s+(.+?)\s*↔\s*(.+?)\.\s*Hãy chọn điểm để nối lại!$/i, (_, a, b) => `Removed line ${a} ↔ ${b}. Select dots to reconnect!`],
+  [/^Đã xóa đường nối\s+(.+?)\s*↔\s*(.+?)\.\s*Em có thể nối lại!$/i, (_, a, b) => `Removed line ${a} ↔ ${b}. You can reconnect now!`],
+  [/^Xóa đường nối\s+(.+?)\s*↔\s*(.+?)\s+để nối lại$/i, (_, a, b) => `Remove line ${a} ↔ ${b} to reconnect`],
+  [/^Xóa đường nối\s+(.+?)\s+và\s+(.+?)$/i, (_, a, b) => `Remove line ${a} and ${b}`],
+  [/^Đã bỏ đường nối ở điểm "(.+?)"\.\s*Em hãy chọn lại để nối!$/i, (_, p) => `Unlinked dot "${p}". Select dots to reconnect!`],
+  [/^Xóa đường nối ở điểm "(.+?)"\s+để nối lại$/i, (_, p) => `Unlink dot "${p}" to reconnect`],
+  [/^Xóa đường nối điểm\s+(.+)$/i, (_, p) => `Unlink dot ${p}`],
+  [/^Đã xóa cặp\s+(.+?)\s*↔\s*(.+?)\.\s*Em có thể nối lại!$/i, (_, a, b) => `Removed pair ${a} ↔ ${b}. You can reconnect now!`],
   [/^([\d.]+)đ\s*\/\s*mỗi từ đúng$/i, (_, p) => `${p} pts / word`],
   [/^Còn\s*(\d+)\s*câu chưa trả lời\.\s*Bắt buộc hoàn thành tất cả mới được nộp bài\.$/i, (_, n) => `${n} question(s) unanswered. Complete all questions before submitting.`],
   [/^Part\s+(\d+)\s*-\s*Câu\s+(\d+)\s*\((.+)\)$/i, (_, p, q, t) => `Part ${p} - Question ${q} (${t})`],

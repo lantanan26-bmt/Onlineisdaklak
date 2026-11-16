@@ -2554,20 +2554,37 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                       <div className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
                         <i className="fa-solid fa-bezier-curve"></i>
                         <span>
-                          Nhấn vào điểm thứ nhất rồi nhấn vào điểm thứ hai để nối đường kẻ:
+                          Nhấn điểm thứ nhất rồi điểm thứ hai để nối. Bấm nút ✕ trên đường nối hoặc trên điểm để xóa nối sai và nối lại:
                         </span>
                       </div>
-                      {!isSubmitted && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUserAnswers((prev) => ({ ...prev, [qIdx]: [] }));
-                            setActiveConnectPoint(null);
-                          }}
-                          className="text-[11px] font-bold text-red-600 hover:underline cursor-pointer"
-                        >
-                          Xóa tất cả đường nối của em
-                        </button>
+                      {!isSubmitted && ((userAnswers[qIdx] as [string, string][]) || []).length > 0 && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUserAnswers((prev) => {
+                                const cur = ((prev[qIdx] as [string, string][]) || []);
+                                return { ...prev, [qIdx]: cur.slice(0, -1) };
+                              });
+                              setActiveConnectPoint(null);
+                            }}
+                            className="text-[11px] font-bold text-amber-700 hover:text-amber-900 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <i className="fa-solid fa-rotate-left"></i>
+                            <span>Hoàn tác nét vừa nối</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUserAnswers((prev) => ({ ...prev, [qIdx]: [] }));
+                              setActiveConnectPoint(null);
+                            }}
+                            className="text-[11px] font-bold text-red-600 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                            <span>Xóa tất cả đường nối của em</span>
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -2594,11 +2611,6 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                             const ptA = q.connectPairs?.points.find((p) => p.label === exPair[0]);
                             const ptB = q.connectPairs?.points.find((p) => p.label === exPair[1]);
                             if (!ptA || !ptB) return null;
-                            const midX = (ptA.x + ptB.x) / 2;
-                            const midY = (ptA.y + ptB.y) / 2;
-                            const badgeText =
-                              q.connectPairs?.examplePairLabel ||
-                              `★ VÍ DỤ (EXAMPLE): ${ptA.text || ptA.label} ➔ ${ptB.text || ptB.label}`;
 
                             return (
                               <g key="example-pair-line">
@@ -2645,19 +2657,79 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                             const ptB = q.connectPairs?.points.find((p) => p.label === pair[1]);
                             if (!ptA || !ptB) return null;
                             return (
-                              <line
-                                key={pIdx}
-                                x1={ptA.x}
-                                y1={ptA.y}
-                                x2={ptB.x}
-                                y2={ptB.y}
-                                stroke={isSubmitted ? (isCorrect ? '#16a34a' : '#dc2626') : (q.connectPairs?.defaultColor || '#2563eb')}
-                                strokeWidth="4.5"
-                                strokeLinecap="round"
-                              />
+                              <g key={`${pair[0]}-${pair[1]}-${pIdx}`}>
+                                <line
+                                  x1={ptA.x}
+                                  y1={ptA.y}
+                                  x2={ptB.x}
+                                  y2={ptB.y}
+                                  stroke={isSubmitted ? (isCorrect ? '#16a34a' : '#dc2626') : (q.connectPairs?.defaultColor || '#2563eb')}
+                                  strokeWidth="4.5"
+                                  strokeLinecap="round"
+                                />
+                                {!isSubmitted && (
+                                  <line
+                                    x1={ptA.x}
+                                    y1={ptA.y}
+                                    x2={ptB.x}
+                                    y2={ptB.y}
+                                    stroke="transparent"
+                                    strokeWidth="18"
+                                    strokeLinecap="round"
+                                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setUserAnswers((prev) => {
+                                        const cur = ((prev[qIdx] as [string, string][]) || []);
+                                        return { ...prev, [qIdx]: cur.filter((_, idx) => idx !== pIdx) };
+                                      });
+                                      setActiveConnectPoint(null);
+                                      showToast(`Đã xóa đường nối ${ptA.text || ptA.label} ↔ ${ptB.text || ptB.label}. Hãy chọn điểm để nối lại!`, 'info');
+                                    }}
+                                  >
+                                    <title>Bấm để xóa đường nối này và nối lại</title>
+                                  </line>
+                                )}
+                              </g>
                             );
                           })}
                         </svg>
+
+                        {/* Midpoint Delete (X) buttons on each student-drawn line */}
+                        {!isSubmitted &&
+                          ((userAnswers[qIdx] as [string, string][]) || []).map((pair, pIdx) => {
+                            const W = q.connectPairs?.width || 700;
+                            const H = q.connectPairs?.height || 420;
+                            const ptA = q.connectPairs?.points.find((p) => p.label === pair[0]);
+                            const ptB = q.connectPairs?.points.find((p) => p.label === pair[1]);
+                            if (!ptA || !ptB) return null;
+                            const midX = (ptA.x + ptB.x) / 2;
+                            const midY = (ptA.y + ptB.y) / 2;
+                            return (
+                              <button
+                                key={`del-line-${pair[0]}-${pair[1]}-${pIdx}`}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setUserAnswers((prev) => {
+                                    const cur = ((prev[qIdx] as [string, string][]) || []);
+                                    return { ...prev, [qIdx]: cur.filter((_, idx) => idx !== pIdx) };
+                                  });
+                                  setActiveConnectPoint(null);
+                                  showToast(`Đã xóa đường nối ${ptA.text || ptA.label} ↔ ${ptB.text || ptB.label}. Em có thể nối lại!`, 'info');
+                                }}
+                                title={`Xóa đường nối ${ptA.text || ptA.label} ↔ ${ptB.text || ptB.label} để nối lại`}
+                                aria-label={`Xóa đường nối ${pair[0]} và ${pair[1]}`}
+                                className="absolute w-6 h-6 rounded-full bg-white hover:bg-rose-600 text-rose-600 hover:text-white border-2 border-rose-500 shadow-md flex items-center justify-center text-[11px] font-black z-[25] transition hover:scale-110 cursor-pointer"
+                                style={{
+                                  left: `${(midX / W) * 100}%`,
+                                  top: `${(midY / H) * 100}%`,
+                                  transform: 'translate(-50%, -50%)'
+                                }}
+                              >
+                                <i className="fa-solid fa-xmark"></i>
+                              </button>
+                            );
+                          })}
 
                         {(q.connectPairs?.points || []).map((pt, pti) => {
                           const W = q.connectPairs?.width || 700;
@@ -2671,44 +2743,20 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                             curEx && (pt.label === curEx[0] || pt.label === curEx[1]);
                           const isCurrentActive =
                             activeConnectPoint?.qIdx === qIdx && activeConnectPoint?.label === pt.label;
+                          const currentPairsForQ = ((userAnswers[qIdx] as [string, string][]) || []);
+                          const isPointConnected =
+                            !isExamplePoint &&
+                            currentPairsForQ.some((p) => p[0] === pt.label || p[1] === pt.label);
 
                           return (
-                            <button
+                            <div
                               key={pti}
-                              type="button"
-                              disabled={isSubmitted}
-                              onClick={() => {
-                                if (isSubmitted) return;
-                                if (isExamplePoint) {
-                                  showToast(`Điểm "${pt.text || pt.label}" là câu ví dụ mẫu đã được nối sẵn!`, 'info');
-                                  return;
-                                }
-                                if (!activeConnectPoint || activeConnectPoint.qIdx !== qIdx) {
-                                  setActiveConnectPoint({ qIdx, label: pt.label });
-                                } else if (activeConnectPoint.label === pt.label) {
-                                  setActiveConnectPoint(null);
-                                } else {
-                                  // Connect activeConnectPoint.label with pt.label
-                                  const currentPairs: [string, string][] = (userAnswers[qIdx] as [string, string][]) || [];
-                                  // Remove any existing pair that includes either of these points
-                                  const filtered = currentPairs.filter(
-                                    (p) =>
-                                      p[0] !== activeConnectPoint.label &&
-                                      p[1] !== activeConnectPoint.label &&
-                                      p[0] !== pt.label &&
-                                      p[1] !== pt.label
-                                  );
-                                  filtered.push([activeConnectPoint.label, pt.label]);
-                                  setUserAnswers((prev) => ({ ...prev, [qIdx]: filtered }));
-                                  setActiveConnectPoint(null);
-                                }
-                              }}
-                              className={`absolute flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/95 border-2 shadow-md cursor-pointer transition select-none ${
+                              className={`absolute ${
                                 isCurrentActive
-                                  ? 'border-yellow-500 ring-4 ring-offset-2 ring-yellow-400 scale-110 z-20 shadow-xl'
+                                  ? 'z-20'
                                   : isExamplePoint
-                                  ? 'border-emerald-500 z-15 bg-white/95'
-                                  : 'border-slate-200 hover:border-blue-500 hover:scale-105 z-10'
+                                  ? 'z-[15]'
+                                  : 'z-10'
                               }`}
                               style={{
                                 left: `${(pt.x / W) * 100}%`,
@@ -2716,35 +2764,139 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                 transform: 'translate(-50%, -50%)'
                               }}
                             >
-                              {/* Dot Anchor (Mặc định toàn bộ điểm cùng 1 màu để học sinh không đoán qua màu sắc) */}
-                              <div
-                                className="w-7 h-7 rounded-full text-white font-black flex items-center justify-center text-xs shadow-xs shrink-0"
-                                style={{ backgroundColor: q.connectPairs?.defaultColor || '#2563eb' }}
-                                data-preserve-content="true"
+                              <button
+                                type="button"
+                                disabled={isSubmitted}
+                                onClick={() => {
+                                  if (isSubmitted) return;
+                                  if (isExamplePoint) {
+                                    showToast(`Điểm "${pt.text || pt.label}" là câu ví dụ mẫu đã được nối sẵn!`, 'info');
+                                    return;
+                                  }
+                                  if (!activeConnectPoint || activeConnectPoint.qIdx !== qIdx) {
+                                    setActiveConnectPoint({ qIdx, label: pt.label });
+                                  } else if (activeConnectPoint.label === pt.label) {
+                                    setActiveConnectPoint(null);
+                                  } else {
+                                    // Connect activeConnectPoint.label with pt.label
+                                    const currentPairs: [string, string][] = (userAnswers[qIdx] as [string, string][]) || [];
+                                    // Remove any existing pair that includes either of these points
+                                    const filtered = currentPairs.filter(
+                                      (p) =>
+                                        p[0] !== activeConnectPoint.label &&
+                                        p[1] !== activeConnectPoint.label &&
+                                        p[0] !== pt.label &&
+                                        p[1] !== pt.label
+                                    );
+                                    filtered.push([activeConnectPoint.label, pt.label]);
+                                    setUserAnswers((prev) => ({ ...prev, [qIdx]: filtered }));
+                                    setActiveConnectPoint(null);
+                                  }
+                                }}
+                                className={`flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/95 border-2 shadow-md cursor-pointer transition select-none ${
+                                  isCurrentActive
+                                    ? 'border-yellow-500 ring-4 ring-offset-2 ring-yellow-400 scale-110 shadow-xl'
+                                    : isExamplePoint
+                                    ? 'border-emerald-500 bg-white/95'
+                                    : isPointConnected
+                                    ? 'border-blue-500 bg-blue-50/95 hover:scale-105'
+                                    : 'border-slate-200 hover:border-blue-500 hover:scale-105'
+                                }`}
                               >
-                                {pt.label}
-                              </div>
+                                {/* Dot Anchor (Mặc định toàn bộ điểm cùng 1 màu để học sinh không đoán qua màu sắc) */}
+                                <div
+                                  className="w-7 h-7 rounded-full text-white font-black flex items-center justify-center text-xs shadow-xs shrink-0"
+                                  style={{ backgroundColor: q.connectPairs?.defaultColor || '#2563eb' }}
+                                  data-preserve-content="true"
+                                >
+                                  {pt.label}
+                                </div>
 
-                              {/* Attached Image Thumbnail */}
-                              {pt.img && (
-                                <img
-                                  src={pt.img}
-                                  alt=""
-                                  className="w-10 h-10 rounded-lg object-contain border border-slate-200 bg-white shrink-0 pointer-events-none"
-                                />
-                              )}
+                                {/* Attached Image Thumbnail */}
+                                {pt.img && (
+                                  <img
+                                    src={pt.img}
+                                    alt=""
+                                    className="w-10 h-10 rounded-lg object-contain border border-slate-200 bg-white shrink-0 pointer-events-none"
+                                  />
+                                )}
 
-                              {/* Attached Text / Word */}
-                              {pt.text && (
-                                <span className="font-extrabold text-xs sm:text-sm text-slate-800 px-1 truncate max-w-[150px] pointer-events-none" data-preserve-content="true">
-                                  {pt.text}
-                                </span>
+                                {/* Attached Text / Word */}
+                                {pt.text && (
+                                  <span className="font-extrabold text-xs sm:text-sm text-slate-800 px-1 truncate max-w-[150px] pointer-events-none" data-preserve-content="true">
+                                    {pt.text}
+                                  </span>
+                                )}
+                              </button>
+
+                              {/* Quick Unlink (X) badge on connected point to delete its wrong connection & reconnect */}
+                              {!isSubmitted && isPointConnected && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setUserAnswers((prev) => {
+                                      const cur = ((prev[qIdx] as [string, string][]) || []);
+                                      return {
+                                        ...prev,
+                                        [qIdx]: cur.filter((p) => p[0] !== pt.label && p[1] !== pt.label)
+                                      };
+                                    });
+                                    if (activeConnectPoint?.qIdx === qIdx && activeConnectPoint?.label === pt.label) {
+                                      setActiveConnectPoint(null);
+                                    }
+                                    showToast(`Đã bỏ đường nối ở điểm "${pt.text || pt.label}". Em hãy chọn lại để nối!`, 'info');
+                                  }}
+                                  title={`Xóa đường nối ở điểm "${pt.text || pt.label}" để nối lại`}
+                                  aria-label={`Xóa đường nối điểm ${pt.label}`}
+                                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-rose-600 hover:bg-rose-700 text-white border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-black cursor-pointer transition hover:scale-110 z-30"
+                                >
+                                  <i className="fa-solid fa-xmark"></i>
+                                </button>
                               )}
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
                     </div>
+
+                    {/* Connected Pairs Removable Chips Bar (while taking exam) */}
+                    {!isSubmitted && ((userAnswers[qIdx] as [string, string][]) || []).length > 0 && (
+                      <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] font-extrabold text-purple-900 flex items-center gap-1">
+                          <i className="fa-solid fa-link"></i> Các cặp em đã nối (bấm ✕ để xóa nối lại):
+                        </span>
+                        {((userAnswers[qIdx] as [string, string][]) || []).map((pair, pIdx) => {
+                          const ptA = q.connectPairs?.points.find((p) => p.label === pair[0]);
+                          const ptB = q.connectPairs?.points.find((p) => p.label === pair[1]);
+                          const labelA = ptA?.text ? `${pair[0]} (${ptA.text})` : pair[0];
+                          const labelB = ptB?.text ? `${pair[1]} (${ptB.text})` : pair[1];
+                          return (
+                            <span
+                              key={`chip-${pair[0]}-${pair[1]}-${pIdx}`}
+                              className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full bg-white border border-purple-300 text-xs font-bold text-slate-800 shadow-2xs"
+                            >
+                              <span data-preserve-content="true">{labelA} ↔ {labelB}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUserAnswers((prev) => {
+                                    const cur = ((prev[qIdx] as [string, string][]) || []);
+                                    return { ...prev, [qIdx]: cur.filter((_, idx) => idx !== pIdx) };
+                                  });
+                                  setActiveConnectPoint(null);
+                                  showToast(`Đã xóa cặp ${labelA} ↔ ${labelB}. Em có thể nối lại!`, 'info');
+                                }}
+                                title="Xóa cặp nối này để nối lại"
+                                className="w-5 h-5 rounded-full bg-rose-100 hover:bg-rose-600 text-rose-700 hover:text-white flex items-center justify-center text-[10px] transition cursor-pointer"
+                              >
+                                <i className="fa-solid fa-xmark"></i>
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     {isSubmitted && (
                       <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
