@@ -50,7 +50,10 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
           </span>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs sm:text-sm font-black text-amber-950 uppercase tracking-tight">
+              <span
+                data-preserve-content={example.title ? 'true' : undefined}
+                className="text-xs sm:text-sm font-black text-amber-950 uppercase tracking-tight"
+              >
                 {example.title || `VÍ DỤ MẪU (EXAMPLE) - PART ${partDisplayNumber || ''}`}
               </span>
               <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white font-extrabold text-[10px] sm:text-[11px] shadow-xs flex items-center gap-1">
@@ -59,7 +62,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
             </div>
             {partTitle && (
               <p className="text-[11px] text-amber-800 font-semibold truncate max-w-md">
-                Áp dụng cho: <strong>{partTitle}</strong>
+                Áp dụng cho: <strong data-preserve-content="true">{partTitle}</strong>
               </p>
             )}
           </div>
@@ -111,6 +114,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                 Câu hỏi ví dụ:
               </span>
               <div
+                data-preserve-content="true"
                 className="text-xs sm:text-sm font-bold text-slate-800 leading-relaxed flex-1"
                 dangerouslySetInnerHTML={{ __html: example.questionText }}
               />
@@ -163,7 +167,9 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                         >
                           {String.fromCharCode(65 + oIdx)}
                         </span>
-                        <span className="text-xs sm:text-sm font-bold truncate">{opt.text}</span>
+                        <span data-preserve-content="true" className="text-xs sm:text-sm font-bold truncate">
+                          {opt.text}
+                        </span>
                       </div>
                       {isSampleSelected && (
                         <span className="px-2 py-0.5 rounded-md bg-white text-emerald-800 text-[10px] font-black shrink-0 flex items-center gap-1 shadow-xs">
@@ -218,7 +224,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
               <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-emerald-200">
                 <span className="text-xs font-bold text-slate-600">Ô gõ câu trả lời mẫu:</span>
                 <div className="flex items-center gap-2 bg-emerald-100/80 border-2 border-emerald-500 rounded-xl px-4 py-2">
-                  <span className="font-mono font-black text-sm sm:text-base text-emerald-950 tracking-wider">
+                  <span data-preserve-content="true" className="font-mono font-black text-sm sm:text-base text-emerald-950 tracking-wider">
                     {example.answerText || 'May'}
                   </span>
                   <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-black flex items-center gap-1 shadow-xs">
@@ -410,10 +416,15 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                 {/* Connection Pair Summary Pills */}
                 <div className="flex flex-wrap items-center justify-center gap-2.5 py-1">
                   <div className="px-3.5 py-2 rounded-xl bg-blue-50 border-2 border-blue-300 text-blue-950 font-black text-xs sm:text-sm flex items-center gap-2 shadow-2xs">
-                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-mono">
+                    <span
+                      data-preserve-content="true"
+                      className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-mono"
+                    >
                       {example.connectPair?.fromLabel || 'A'}
                     </span>
-                    <span>{example.connectPair?.fromText || example.connectPair?.fromLabel || 'Ben'}</span>
+                    <span data-preserve-content="true">
+                      {example.connectPair?.fromText || example.connectPair?.fromLabel || 'Ben'}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-1 text-emerald-600 font-black px-2">
@@ -422,10 +433,15 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                   </div>
 
                   <div className="px-3.5 py-2 rounded-xl bg-emerald-50 border-2 border-emerald-300 text-emerald-950 font-black text-xs sm:text-sm flex items-center gap-2 shadow-2xs">
-                    <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[11px] flex items-center justify-center font-mono">
+                    <span
+                      data-preserve-content="true"
+                      className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[11px] flex items-center justify-center font-mono"
+                    >
                       {example.connectPair?.toLabel || 'B'}
                     </span>
-                    <span>{example.connectPair?.toText || example.connectPair?.toLabel || 'Boy flying blue kite'}</span>
+                    <span data-preserve-content="true">
+                      {example.connectPair?.toText || example.connectPair?.toLabel || 'Boy flying blue kite'}
+                    </span>
                   </div>
                 </div>
 
@@ -440,7 +456,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
             {example.type === 'story-word-bank' && (
               <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-2">
                 {example.storySnippet && (
-                  <div className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium">
+                  <div data-preserve-content="true" className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium">
                     {example.storySnippet}
                   </div>
                 )}
@@ -448,7 +464,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-600">Từ được chọn điền vào ô (0):</span>
                     <span className="px-3 py-1 rounded-xl bg-emerald-600 text-white font-black text-xs shadow-xs">
-                      {example.storyWord} (Đã điền mẫu)
+                      <span data-preserve-content="true">{example.storyWord}</span> (Đã điền mẫu)
                     </span>
                   </div>
                 )}
@@ -475,7 +491,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                       style={{ backgroundColor: example.colourItem.color }}
                     />
                     <div>
-                      <strong>Chi tiết mẫu:</strong> {example.colourItem.label} ➔{' '}
+                      <strong>Chi tiết mẫu:</strong> <span data-preserve-content="true">{example.colourItem.label}</span> ➔{' '}
                       <span className="text-orange-900 font-black">
                         Đã tô màu {example.colourItem.colorName || example.colourItem.color}
                       </span>
@@ -501,7 +517,10 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
               example.answerText && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-700">Đáp án mẫu:</span>
-                  <span className="px-3 py-1 rounded-xl bg-emerald-600 text-white font-black text-xs sm:text-sm shadow-xs">
+                  <span
+                    data-preserve-content="true"
+                    className="px-3 py-1 rounded-xl bg-emerald-600 text-white font-black text-xs sm:text-sm shadow-xs"
+                  >
                     {example.answerText}
                   </span>
                 </div>
@@ -515,7 +534,7 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
                 <i className="fa-solid fa-graduation-cap text-amber-700"></i>
                 <span>Hướng dẫn học sinh cách làm bài:</span>
               </div>
-              <p className="font-semibold text-slate-800">{example.explanation}</p>
+              <p data-preserve-content="true" className="font-semibold text-slate-800">{example.explanation}</p>
             </div>
           )}
 

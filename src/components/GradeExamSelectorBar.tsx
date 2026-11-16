@@ -136,7 +136,7 @@ export const GradeExamSelectorBar: React.FC<GradeExamSelectorBarProps> = ({
             </div>
             <h2 className="text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-2 mt-0.5">
               <span>Đang soạn:</span>
-              <span className="text-amber-300 underline decoration-amber-400 underline-offset-4">
+              <span className="text-amber-300 underline decoration-amber-400 underline-offset-4" data-preserve-content="true">
                 {currentExam?.title || 'Đề thi Khối 2'}
               </span>
             </h2>
@@ -246,7 +246,7 @@ export const GradeExamSelectorBar: React.FC<GradeExamSelectorBarProps> = ({
             {currentExam?.grade}
           </span>
           <span className="text-indigo-200">Lớp:</span>
-          <span className="font-extrabold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+          <span className="font-extrabold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30" data-preserve-content={currentExam?.className && currentExam.className !== 'Tất cả các lớp' ? 'true' : undefined}>
             {currentExam?.className || 'Tất cả các lớp'}
           </span>
           <span className="text-indigo-200">Thời gian làm bài:</span>
@@ -383,7 +383,7 @@ export const GradeExamSelectorBar: React.FC<GradeExamSelectorBarProps> = ({
                 >
                   <option value="none">Đề trống (Bắt đầu với 1 Part mẫu để tự soạn)</option>
                   {gradeExams.map((e) => (
-                    <option key={e.id} value={e.id}>
+                    <option key={e.id} value={e.id} data-preserve-content="true">
                       Sao chép toàn bộ từ: {e.title} ({e.grade} - {e.questions.length} câu)
                     </option>
                   ))}

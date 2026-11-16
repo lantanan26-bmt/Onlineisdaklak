@@ -425,7 +425,7 @@ export const CameraExamGraderModal: React.FC<CameraExamGraderModalProps> = ({
                   className="bg-slate-900 border border-indigo-500/50 rounded-lg px-2 py-1 text-white font-semibold focus:outline-none focus:ring-1 focus:ring-amber-400 text-xs"
                 >
                   {gradeExams.map((ge) => (
-                    <option key={ge.id} value={ge.id}>
+                    <option key={ge.id} value={ge.id} data-preserve-content="true">
                       {ge.grade} {ge.className && ge.className !== 'Tất cả các lớp' ? `(${ge.className})` : ''} - {ge.title}
                     </option>
                   ))}
@@ -723,17 +723,17 @@ export const CameraExamGraderModal: React.FC<CameraExamGraderModalProps> = ({
                           <div>
                             <div className="text-xs font-bold text-white flex items-center gap-2">
                               <span>Câu {item.questionNumber}:</span>
-                              <span className="text-slate-300 font-normal line-clamp-1 max-w-md">
+                              <span className="text-slate-300 font-normal line-clamp-1 max-w-md" data-preserve-content={item.prompt ? 'true' : undefined}>
                                 {item.prompt || 'Đề bài'}
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-400 flex items-center gap-3 mt-0.5">
                               <span>
-                                Học sinh làm: <strong className="text-amber-300">{item.studentAnswer || 'Không chọn'}</strong>
+                                Học sinh làm: <strong className="text-amber-300" data-preserve-content={item.studentAnswer ? 'true' : undefined}>{item.studentAnswer || 'Không chọn'}</strong>
                               </span>
                               <span>•</span>
                               <span>
-                                Đáp án đúng: <strong className="text-emerald-300">{item.correctAnswer}</strong>
+                                Đáp án đúng: <strong className="text-emerald-300" data-preserve-content="true">{item.correctAnswer}</strong>
                               </span>
                             </div>
                           </div>

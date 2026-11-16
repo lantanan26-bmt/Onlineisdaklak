@@ -67,7 +67,10 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
     <div className="bg-white border-2 border-slate-300 rounded-3xl p-5 sm:p-8 shadow-md space-y-6 w-full font-sans text-slate-900">
       {/* 1. TOP SECTION: ĐỀ BÀI (Chung cho cả Part 2) */}
       <div className="text-center space-y-2 border-b border-slate-200 pb-5">
-        <div className="inline-block px-4 py-1 rounded-full bg-slate-900 text-white font-black text-sm tracking-widest uppercase shadow-xs">
+        <div
+          data-preserve-content={part.title ? 'true' : undefined}
+          className="inline-block px-4 py-1 rounded-full bg-slate-900 text-white font-black text-sm tracking-widest uppercase shadow-xs"
+        >
           {part.title || 'Part 2'}
         </div>
         <div className="text-xs sm:text-sm font-bold text-slate-600">
@@ -75,12 +78,18 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
         </div>
 
         {/* English instructions */}
-        <div className="text-sm sm:text-base font-extrabold text-slate-900 bg-slate-100/80 py-2 px-4 rounded-xl border border-slate-200/60 inline-block max-w-2xl">
+        <div
+          data-preserve-content={part.instructions ? 'true' : undefined}
+          className="text-sm sm:text-base font-extrabold text-slate-900 bg-slate-100/80 py-2 px-4 rounded-xl border border-slate-200/60 inline-block max-w-2xl"
+        >
           {part.instructions || 'Read the questions. Listen and write a name or a number. There are two examples.'}
         </div>
 
         {/* Vietnamese subtitle */}
-        <div className="text-xs sm:text-sm italic font-semibold text-slate-600 max-w-2xl mx-auto">
+        <div
+          data-preserve-content={part.subInstructions ? 'true' : undefined}
+          className="text-xs sm:text-sm italic font-semibold text-slate-600 max-w-2xl mx-auto"
+        >
           {part.subInstructions || 'Đọc câu hỏi. Lắng nghe và viết tên hoặc số thích hợp. Dưới đây là 2 ví dụ.'}
         </div>
       </div>
@@ -133,7 +142,10 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
           {/* TÊN CỦA ẢNH (Chỉ hiển thị nếu giáo viên có điền tên, nếu không điền thì hoàn toàn không hiển thị) */}
           {part.imageTitle && part.imageTitle.trim().length > 0 && (
             <div className="text-center pt-1">
-              <h3 className="text-base sm:text-xl font-black uppercase tracking-widest text-slate-900 font-serif">
+              <h3
+                data-preserve-content="true"
+                className="text-base sm:text-xl font-black uppercase tracking-widest text-slate-900 font-serif"
+              >
                 {part.imageTitle.trim()}
               </h3>
             </div>
@@ -157,10 +169,13 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
           {examples.map((ex, idx) => (
             <div key={idx} className="flex flex-wrap items-baseline justify-between gap-3 border-b border-amber-100/80 pb-1.5 last:border-none">
               <div className="flex items-center gap-2 flex-1 min-w-[220px]">
-                <span className="text-slate-700">{ex.question}</span>
+                <span data-preserve-content="true" className="text-slate-700">{ex.question}</span>
               </div>
               <div className="shrink-0 flex items-center gap-2">
-                <span className="inline-block min-w-[90px] text-right font-black text-sm sm:text-base text-slate-950 italic border-b-2 border-slate-800 pb-0.5 px-2">
+                <span
+                  data-preserve-content="true"
+                  className="inline-block min-w-[90px] text-right font-black text-sm sm:text-base text-slate-950 italic border-b-2 border-slate-800 pb-0.5 px-2"
+                >
                   {ex.answer}
                 </span>
                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
@@ -218,6 +233,7 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
                       {item.localNumber}.
                     </span>
                     <div
+                      data-preserve-content="true"
                       className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed pt-1"
                       dangerouslySetInnerHTML={{ __html: cleanQuestionText }}
                     />
@@ -271,11 +287,14 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
                 {isSubmitted && (
                   <div className="mt-2.5 pt-2 border-t border-slate-100 text-xs flex items-center justify-between flex-wrap gap-2">
                     <span className="text-slate-500">
-                      Đáp án được chấp nhận: <strong className="text-emerald-700">{(q.acceptableAnswers || []).join(' / ')}</strong>
+                      Đáp án được chấp nhận:{' '}
+                      <strong data-preserve-content="true" className="text-emerald-700">
+                        {(q.acceptableAnswers || []).join(' / ')}
+                      </strong>
                     </span>
                     {!isCorrect && (
                       <span className="text-red-600 font-bold text-[11px]">
-                        Em đã điền: "{currentAns || '(chưa điền)'}"
+                        Em đã điền: &quot;<span data-preserve-content={currentAns ? 'true' : undefined}>{currentAns || '(chưa điền)'}</span>&quot;
                       </span>
                     )}
                   </div>
@@ -300,7 +319,12 @@ export const CambridgePart2View: React.FC<CambridgePart2ViewProps> = ({
               <div>
                 <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
                   <i className="fa-solid fa-image text-indigo-400"></i>
-                  <span>Bức tranh toàn cảnh: {part.imageTitle || 'Part 2 Scene'}</span>
+                  <span>
+                    Bức tranh toàn cảnh:{' '}
+                    <span data-preserve-content={part.imageTitle ? 'true' : undefined}>
+                      {part.imageTitle || 'Part 2 Scene'}
+                    </span>
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-300">
                   Phóng to cực đại để học sinh quan sát rõ từng chi tiết

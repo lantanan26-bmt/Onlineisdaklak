@@ -26,6 +26,41 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "appName": {
+          "type": "string",
+          "description": "Admin-customized header system/school title",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "appSubtitle": {
+          "type": "string",
+          "description": "Admin-customized header subtitle",
+          "maxLength": 200
+        },
+        "logoText": {
+          "type": "string",
+          "description": "Short monogram fallback for logo badge",
+          "minLength": 1,
+          "maxLength": 8
+        },
+        "logoUrl": {
+          "type": "string",
+          "description": "Compressed logo image data URL or HTTPS URL",
+          "maxLength": 200000
+        },
+        "logoWidth": {
+          "type": "number",
+          "description": "Custom logo width in pixels (24 to 280)"
+        },
+        "logoHeight": {
+          "type": "number",
+          "description": "Custom logo height in pixels (24 to 120)"
+        },
+        "logoFit": {
+          "type": "string",
+          "description": "Image object-fit mode for custom logo",
+          "enum": ["contain", "cover", "fill"]
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",

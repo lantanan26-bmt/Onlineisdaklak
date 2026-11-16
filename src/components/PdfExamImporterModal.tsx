@@ -822,7 +822,7 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                         key={idx}
                         className="p-2.5 rounded-xl bg-white border border-slate-200 hover:border-blue-300 flex items-center justify-between gap-3 text-xs shadow-2xs group"
                       >
-                        <span className="font-sans text-slate-800 flex-1 leading-relaxed">
+                        <span className="font-sans text-slate-800 flex-1 leading-relaxed" data-preserve-content="true">
                           {line}
                         </span>
 
@@ -907,7 +907,7 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                         className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg text-indigo-900 focus:outline-none"
                       >
                         {parts.map((p, pi) => (
-                          <option key={p.id} value={p.id}>
+                          <option key={p.id} value={p.id} data-preserve-content="true">
                             Part {pi + 1}: {p.title} ({p.points}đ)
                           </option>
                         ))}

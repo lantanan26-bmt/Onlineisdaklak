@@ -84,7 +84,10 @@ export const CambridgePart1RWView: React.FC<CambridgePart1RWViewProps> = ({
     <div className="bg-white border-2 border-slate-300 rounded-3xl p-4 sm:p-7 shadow-md space-y-6 w-full font-sans text-slate-900">
       {/* 1. TOP HEADER - Exact Cambridge Exam Style */}
       <div className="text-center space-y-2 border-b border-slate-200 pb-5">
-        <div className="inline-block px-4 py-1 rounded-full bg-slate-900 text-white font-black text-sm tracking-widest uppercase shadow-xs">
+        <div
+          data-preserve-content={part.title ? 'true' : undefined}
+          className="inline-block px-4 py-1 rounded-full bg-slate-900 text-white font-black text-sm tracking-widest uppercase shadow-xs"
+        >
           {part.title || 'Part 1'}
         </div>
         <div className="text-xs sm:text-sm font-bold text-slate-600">
@@ -92,13 +95,19 @@ export const CambridgePart1RWView: React.FC<CambridgePart1RWViewProps> = ({
         </div>
 
         {/* English instructions */}
-        <div className="text-sm sm:text-base font-extrabold text-slate-900 bg-slate-100/90 py-2 px-4 rounded-xl border border-slate-200 inline-block max-w-2xl">
+        <div
+          data-preserve-content={part.instructions ? 'true' : undefined}
+          className="text-sm sm:text-base font-extrabold text-slate-900 bg-slate-100/90 py-2 px-4 rounded-xl border border-slate-200 inline-block max-w-2xl"
+        >
           {part.instructions ||
             'Look and read. Put a tick (✓) or a cross (✗) in the box. There are two examples.'}
         </div>
 
         {/* Vietnamese subtitle */}
-        <div className="text-xs sm:text-sm italic font-semibold text-slate-600 max-w-2xl mx-auto">
+        <div
+          data-preserve-content={part.subInstructions ? 'true' : undefined}
+          className="text-xs sm:text-sm italic font-semibold text-slate-600 max-w-2xl mx-auto"
+        >
           {part.subInstructions ||
             'Quan sát và đọc. Đánh dấu (✓) hoặc (✗) vào ô trống. Dưới đây là 2 ví dụ.'}
         </div>
@@ -140,7 +149,10 @@ export const CambridgePart1RWView: React.FC<CambridgePart1RWViewProps> = ({
                   <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-0.5">
                     Ví dụ {exIdx + 1}:
                   </div>
-                  <div className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">
+                  <div
+                    data-preserve-content="true"
+                    className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug"
+                  >
                     {ex.question}
                   </div>
                 </div>
@@ -246,11 +258,17 @@ export const CambridgePart1RWView: React.FC<CambridgePart1RWViewProps> = ({
 
                   {/* English Sentence */}
                   <div className="flex-1 min-w-0 pr-1">
-                    <div className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">
+                    <div
+                      data-preserve-content="true"
+                      className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug"
+                    >
                       {cleanStatement(item.q.q)}
                     </div>
                     {item.q.exampleHint && (
-                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                      <div
+                        data-preserve-content="true"
+                        className="text-[11px] text-slate-500 mt-0.5 truncate"
+                      >
                         {item.q.exampleHint}
                       </div>
                     )}

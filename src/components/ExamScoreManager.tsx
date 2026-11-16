@@ -586,7 +586,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
               >
                 <option value="ALL">-- Tất cả trường ({schools.length}) --</option>
                 {schools.map((s) => (
-                  <option key={s} value={s}>
+                  <option key={s} value={s} data-preserve-content="true">
                     {s}
                   </option>
                 ))}
@@ -623,7 +623,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
               >
                 <option value="ALL">-- Tất cả lớp --</option>
                 {availableClasses.map((c) => (
-                  <option key={c} value={c}>
+                  <option key={c} value={c} data-preserve-content="true">
                     Lớp {c}
                   </option>
                 ))}
@@ -699,17 +699,17 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                       <td className="py-3 px-3 text-center text-slate-400 font-mono text-[11px]">
                         {index + 1}
                       </td>
-                      <td className="py-3 px-3 font-mono font-bold text-slate-700">
+                      <td className="py-3 px-3 font-mono font-bold text-slate-700" data-preserve-content="true">
                         {stu.id}
                       </td>
-                      <td className="py-3 px-4 font-bold text-slate-900">
+                      <td className="py-3 px-4 font-bold text-slate-900" data-preserve-content="true">
                         {stu.name}
                       </td>
-                      <td className="py-3 px-3 text-slate-600 truncate max-w-[160px]" title={stu.school}>
+                      <td className="py-3 px-3 text-slate-600 truncate max-w-[160px]" title={stu.school} data-preserve-content="true">
                         {stu.school}
                       </td>
                       <td className="py-3 px-2 text-center">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[11px]">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[11px]" data-preserve-content="true">
                           {stu.className}
                         </span>
                       </td>
@@ -1082,10 +1082,10 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                   </div>
                   <div>
                     <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                      Bài Làm &amp; Điểm Chi Tiết: {selectedStudentDetail.name}
+                      Bài Làm &amp; Điểm Chi Tiết: <span data-preserve-content="true">{selectedStudentDetail.name}</span>
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Mã HS: <strong>{selectedStudentDetail.id}</strong> • Lớp {selectedStudentDetail.className} • {selectedStudentDetail.school} • Đề: <strong>{matchedExam.title}</strong>
+                      Mã HS: <strong data-preserve-content="true">{selectedStudentDetail.id}</strong> • Lớp <span data-preserve-content="true">{selectedStudentDetail.className}</span> • <span data-preserve-content="true">{selectedStudentDetail.school}</span> • Đề: <strong data-preserve-content="true">{matchedExam.title}</strong>
                     </p>
                   </div>
                 </div>
@@ -1165,7 +1165,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {Object.values(selectedStudentDetail.partScores).map((p) => (
                         <div key={p.partId} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-                          <span className="font-semibold text-slate-700 truncate pr-2" title={p.partTitle}>
+                          <span className="font-semibold text-slate-700 truncate pr-2" title={p.partTitle} data-preserve-content="true">
                             {p.partTitle}
                           </span>
                           <span className="font-mono font-bold text-slate-900 shrink-0">
@@ -1264,7 +1264,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                                   Câu {item.qIdx + 1}
                                 </span>
                                 {item.part && (
-                                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] font-semibold text-slate-600">
+                                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] font-semibold text-slate-600" data-preserve-content="true">
                                     {item.part.title}
                                   </span>
                                 )}
@@ -1283,7 +1283,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                             </div>
 
                             {item.q.q && (
-                              <div className="font-semibold text-slate-800 leading-relaxed">
+                              <div className="font-semibold text-slate-800 leading-relaxed" data-preserve-content="true">
                                 {item.q.q}
                               </div>
                             )}
@@ -1301,13 +1301,13 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                                     }`}
                                   >
                                     <div className="min-w-0">
-                                      <span className="font-bold text-slate-700">{sc.label}:</span>{' '}
-                                      <span className={sc.ok ? 'font-bold text-emerald-700' : 'font-bold text-rose-700 line-through'}>
+                                      <span className="font-bold text-slate-700" data-preserve-content="true">{sc.label}:</span>{' '}
+                                      <span className={sc.ok ? 'font-bold text-emerald-700' : 'font-bold text-rose-700 line-through'} data-preserve-content="true">
                                         {sc.studentVal}
                                       </span>
                                       {!sc.ok && (
                                         <span className="ml-1.5 font-extrabold text-emerald-700">
-                                          ➔ Đáp án: {sc.correctVal}
+                                          ➔ Đáp án: <span data-preserve-content="true">{sc.correctVal}</span>
                                         </span>
                                       )}
                                     </div>
@@ -1323,7 +1323,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                                   <span className="text-[10px] font-bold uppercase text-slate-500 block">
                                     Thí sinh đã làm:
                                   </span>
-                                  <span className={`font-bold ${isOk ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                  <span className={`font-bold ${isOk ? 'text-emerald-700' : 'text-rose-700'}`} data-preserve-content="true">
                                     {item.studentText}
                                   </span>
                                 </div>
@@ -1331,7 +1331,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
                                   <span className="text-[10px] font-bold uppercase text-slate-500 block">
                                     Đáp án đúng của đề:
                                   </span>
-                                  <span className="font-extrabold text-emerald-700">
+                                  <span className="font-extrabold text-emerald-700" data-preserve-content="true">
                                     {item.correctText}
                                   </span>
                                 </div>
@@ -1340,7 +1340,7 @@ export const ExamScoreManager: React.FC<ExamScoreManagerProps> = ({
 
                             {item.q.explanation && (
                               <div className="p-2 rounded-xl bg-blue-50/80 border border-blue-200 text-[11px] text-blue-900">
-                                <strong>Giải thích:</strong> {item.q.explanation}
+                                <strong>Giải thích:</strong> <span data-preserve-content="true">{item.q.explanation}</span>
                               </div>
                             )}
                           </div>

@@ -139,6 +139,44 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
     ctx.restore();
   };
 
+  const drawItemRegionPath = (ctx: CanvasRenderingContext2D, item: ColourItem) => {
+    const w = Math.max(20, item.w || 64);
+    const h = Math.max(20, item.h || 64);
+    ctx.beginPath();
+    if (item.shape === 'circle') {
+      ctx.ellipse(item.x, item.y, w / 2, h / 2, 0, 0, Math.PI * 2);
+      return;
+    }
+    const left = item.x - w / 2;
+    const top = item.y - h / 2;
+    const r = Math.min(14, w / 4, h / 4);
+    ctx.moveTo(left + r, top);
+    ctx.lineTo(left + w - r, top);
+    ctx.quadraticCurveTo(left + w, top, left + w, top + r);
+    ctx.lineTo(left + w, top + h - r);
+    ctx.quadraticCurveTo(left + w, top + h, left + w - r, top + h);
+    ctx.lineTo(left + r, top + h);
+    ctx.quadraticCurveTo(left, top + h, left, top + h - r);
+    ctx.lineTo(left, top + r);
+    ctx.quadraticCurveTo(left, top, left + r, top);
+    ctx.closePath();
+  };
+
+  const isPointInColourItem = (pt: { x: number; y: number }, it: ColourItem): boolean => {
+    const w = Math.max(20, it.w || 64);
+    const h = Math.max(20, it.h || 64);
+    const pad = Math.min(10, Math.max(3, Math.min(w, h) * 0.12));
+    const halfW = w / 2 + pad;
+    const halfH = h / 2 + pad;
+    const dx = pt.x - it.x;
+    const dy = pt.y - it.y;
+
+    if (it.shape === 'circle') {
+      return (dx / halfW) ** 2 + (dy / halfH) ** 2 <= 1;
+    }
+    return Math.abs(dx) <= halfW && Math.abs(dy) <= halfH;
+  };
+
   // Smart Fill: Fills an entire object / wide region smoothly (ideal for wide grass, sky, mountain, lake or objects)
   const performSmartBucketFill = (pt: { x: number; y: number }, crayonId: string) => {
     const canvas = canvasRef.current;
@@ -146,21 +184,20 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Find if the click is within any item's area (testing bounding box for wide areas)
+    // Pick matching spot, prioritizing smallest area first (so small objects inside wide areas stay clickable)
     let matchedItem: ColourItem | null = null;
-    let minDistance = Infinity;
+    let bestArea = Infinity;
+    let bestDist = Infinity;
 
     for (const it of testItems) {
-      const w = it.w || 64;
-      const h = it.h || 64;
-      const halfW = w / 2 + 25;
-      const halfH = h / 2 + 25;
-      const inBox = Math.abs(pt.x - it.x) <= halfW && Math.abs(pt.y - it.y) <= halfH;
-      const dist = Math.hypot(pt.x - it.x, pt.y - it.y);
-
-      if ((inBox || dist <= Math.max(halfW, halfH)) && dist < minDistance) {
-        minDistance = dist;
-        matchedItem = it;
+      if (isPointInColourItem(pt, it)) {
+        const area = Math.max(20, it.w || 64) * Math.max(20, it.h || 64);
+        const dist = Math.hypot(pt.x - it.x, pt.y - it.y);
+        if (area < bestArea || (area === bestArea && dist < bestDist)) {
+          bestArea = area;
+          bestDist = dist;
+          matchedItem = it;
+        }
       }
     }
 
@@ -168,14 +205,11 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
     if (crayonId === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       if (matchedItem) {
-        const rx = Math.max((matchedItem.w || 64) / 2, 35);
-        const ry = Math.max((matchedItem.h || 64) / 2, 35);
-        ctx.beginPath();
-        ctx.ellipse(matchedItem.x, matchedItem.y, rx, ry, 0, 0, Math.PI * 2);
+        drawItemRegionPath(ctx, matchedItem);
         ctx.fill();
       } else {
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 60, 0, Math.PI * 2);
+        ctx.arc(pt.x, pt.y, 48, 0, Math.PI * 2);
         ctx.fill();
       }
     } else {
@@ -185,15 +219,12 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
       ctx.fillStyle = crayon.hex;
 
       if (matchedItem) {
-        const rx = Math.max((matchedItem.w || 64) / 2, 32);
-        const ry = Math.max((matchedItem.h || 64) / 2, 32);
-        ctx.beginPath();
-        ctx.ellipse(matchedItem.x, matchedItem.y, rx, ry, 0, 0, Math.PI * 2);
+        drawItemRegionPath(ctx, matchedItem);
         ctx.fill();
       } else {
         // Free-space bucket click: soft paint dab
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 50, 0, Math.PI * 2);
+        ctx.arc(pt.x, pt.y, 45, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -212,22 +243,13 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
     }
   };
 
-  // Robust Hit-Testing: supports both small items AND wide areas (e.g. grass, hills, sky, river)
+  // Accurate Hit-Testing: respects both tight tiny spots AND wide regions (grass, hills, sky, river)
   const checkHitTest = (pt: { x: number; y: number }, crayonId: string) => {
     let changed = false;
     const next = { ...userAnswerRef.current };
 
     for (const it of testItems) {
-      const w = it.w || 64;
-      const h = it.h || 64;
-      const halfW = w / 2 + 25;
-      const halfH = h / 2 + 25;
-
-      // Check both bounding rectangle and distance from center
-      const inBox = Math.abs(pt.x - it.x) <= halfW && Math.abs(pt.y - it.y) <= halfH;
-      const inRadius = Math.hypot(pt.x - it.x, pt.y - it.y) <= Math.max(halfW, halfH);
-
-      if (inBox || inRadius) {
+      if (isPointInColourItem(pt, it)) {
         if (crayonId === 'eraser') {
           if (next[it.id]) {
             delete next[it.id];
@@ -275,10 +297,7 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 0.6;
       ctx.fillStyle = exColor.hex;
-      ctx.beginPath();
-      const rx = Math.max((exampleItem.w || 70) / 2, 28);
-      const ry = Math.max((exampleItem.h || 70) / 2, 28);
-      ctx.ellipse(exampleItem.x, exampleItem.y, rx, ry, 0, 0, Math.PI * 2);
+      drawItemRegionPath(ctx, exampleItem);
       ctx.fill();
       ctx.restore();
     }
@@ -353,10 +372,7 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
           ctx.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = 0.6;
           ctx.fillStyle = exColor.hex;
-          ctx.beginPath();
-          const rx = Math.max((exampleItem.w || 70) / 2, 28);
-          const ry = Math.max((exampleItem.h || 70) / 2, 28);
-          ctx.ellipse(exampleItem.x, exampleItem.y, rx, ry, 0, 0, Math.PI * 2);
+          drawItemRegionPath(ctx, exampleItem);
           ctx.fill();
           ctx.restore();
         }
@@ -389,7 +405,9 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
           {exampleItem && (
             <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs">
               <i className="fa-solid fa-star text-amber-500"></i>
-              <span>Ví dụ: {exampleItem.label} (đã tô màu {getCrayonInfo(exampleItem.targetColor).name})</span>
+              <span>
+                Ví dụ: <span data-preserve-content="true">{exampleItem.label}</span> (đã tô màu {getCrayonInfo(exampleItem.targetColor).name})
+              </span>
             </span>
           )}
           <span className="text-xs font-black px-3 py-1 rounded-full bg-amber-200 text-amber-950 border border-amber-300 shadow-2xs">
@@ -597,7 +615,9 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
                     height: `${hPct}%`,
                     transform: 'translate(-50%, -50%)'
                   }}
-                  className={`absolute rounded-2xl pointer-events-none z-20 flex flex-col items-center justify-center p-1 border-2 shadow-lg ${
+                  className={`absolute pointer-events-none z-20 flex flex-col items-center justify-center p-1 border-2 shadow-lg ${
+                    item.shape === 'circle' ? 'rounded-full' : 'rounded-xl'
+                  } ${
                     correct
                       ? 'border-emerald-500 bg-emerald-500/20 ring-4 ring-emerald-400'
                       : 'border-red-500 bg-red-500/20 ring-4 ring-red-400'
@@ -673,7 +693,7 @@ export const ListenColourPlayer: React.FC<ListenColourPlayerProps> = ({
                       />
                       <div className="min-w-0">
                         <div className="text-xs font-extrabold text-slate-900 truncate">
-                          {item.label}
+                          <span data-preserve-content="true">{item.label}</span>
                           {item.isExample ? (
                             <span className="ml-1 text-[10px] text-emerald-700 font-black">[Ví dụ mẫu]</span>
                           ) : (

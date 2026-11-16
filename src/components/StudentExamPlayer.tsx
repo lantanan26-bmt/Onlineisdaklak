@@ -18,6 +18,7 @@ interface StudentExamPlayerProps {
   examMinutes: number;
   isTestRun?: boolean;
   initialPartId?: string;
+  initialPendingStudent?: Student | null;
   onExitTestRun?: () => void;
   onLoginStudent: (student: Student) => void;
   onLogoutStudent: () => void;
@@ -33,6 +34,7 @@ interface StudentExamPlayerProps {
   ) => void;
   onRequestUnlockAdmin?: () => void;
   onLookupStudentCloud?: (studentId: string) => Promise<Student | null>;
+  onLookupClassStudentsCloud?: (className: string) => Promise<Student[]>;
   showToast: (msg: string, type?: 'success' | 'warn' | 'error' | 'info') => void;
   openConfirm: (title: string, message: string, onOk: () => void) => void;
 }
@@ -45,23 +47,30 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
   examMinutes,
   isTestRun = false,
   initialPartId,
+  initialPendingStudent = null,
   onExitTestRun,
   onLoginStudent,
   onLogoutStudent,
   onUpdateStudentScore,
   onRequestUnlockAdmin,
   onLookupStudentCloud,
+  onLookupClassStudentsCloud,
   showToast,
   openConfirm
 }) => {
   // Login input state
-  const [loginInputId, setLoginInputId] = useState('');
+  const [loginInputId, setLoginInputId] = useState(initialPendingStudent?.id || '');
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [pendingStudent, setPendingStudent] = useState<Student | null>(null);
+  const [pendingStudent, setPendingStudent] = useState<Student | null>(initialPendingStudent || null);
   const [isLookingUpCloud, setIsLookingUpCloud] = useState(false);
-  const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
-  const [showLookupModal, setShowLookupModal] = useState<boolean>(false);
-  const [lookupSearch, setLookupSearch] = useState<string>('');
+
+  useEffect(() => {
+    if (initialPendingStudent) {
+      setPendingStudent(initialPendingStudent);
+      setLoginInputId(initialPendingStudent.id);
+      setLoginError(null);
+    }
+  }, [initialPendingStudent]);
 
   // Network connection state (Offline / Online resilience)
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -346,7 +355,6 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
     setPendingStudent(null);
     setLoginInputId('');
     setLoginError(null);
-    setShowLookupModal(false);
     onLoginStudent(studentToLogin);
     showToast(`✓ Xác nhận đúng thí sinh ${studentToLogin.name} (Lớp ${studentToLogin.className})! Bắt đầu tính giờ thi.`, 'success');
   };
@@ -828,7 +836,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                   >
                     <option value="" disabled>-- Chọn học sinh từ danh sách --</option>
                     {students.map((s) => (
-                      <option key={s.id} value={s.id}>
+                      <option key={s.id} value={s.id} data-preserve-content="true">
                         {s.id} - {s.name} ({s.school} - {s.className})
                       </option>
                     ))}
@@ -883,7 +891,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 <span className="text-xs font-bold uppercase text-slate-500 block mb-1">Họ Và Tên Thí Sinh</span>
                 <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                   <i className="fa-solid fa-user-graduate text-emerald-600 text-xl sm:text-2xl"></i>
-                  <span>{pendingStudent.name}</span>
+                  <span data-preserve-content="true">{pendingStudent.name}</span>
                 </div>
               </div>
 
@@ -891,13 +899,13 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                   <span className="text-[11px] font-bold uppercase text-slate-500 block">Lớp & Khối</span>
                   <div className="text-sm sm:text-base font-extrabold text-slate-800 mt-0.5">
-                    Lớp {pendingStudent.className} {pendingStudent.grade ? `(${pendingStudent.grade})` : ''}
+                    Lớp <span data-preserve-content="true">{pendingStudent.className}</span> {pendingStudent.grade ? (<span data-preserve-content="true">({pendingStudent.grade})</span>) : ''}
                   </div>
                 </div>
 
                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                   <span className="text-[11px] font-bold uppercase text-slate-500 block">Trường Học</span>
-                  <div className="text-sm sm:text-base font-extrabold text-slate-800 mt-0.5 truncate" title={pendingStudent.school}>
+                  <div className="text-sm sm:text-base font-extrabold text-slate-800 mt-0.5 truncate" title={pendingStudent.school} data-preserve-content="true">
                     {pendingStudent.school}
                   </div>
                 </div>
@@ -951,16 +959,6 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
       );
     }
 
-    const availableClasses = Array.from(new Set(students.map((s) => s.className).filter(Boolean))).sort();
-    const filteredLookupStudents = students.filter((s) => {
-      const matchesClass = selectedClassFilter === 'all' || s.className === selectedClassFilter;
-      const matchesSearch =
-        !lookupSearch.trim() ||
-        s.name.toLowerCase().includes(lookupSearch.toLowerCase().trim()) ||
-        s.id.toLowerCase().includes(lookupSearch.toLowerCase().trim());
-      return matchesClass && matchesSearch;
-    });
-
     return (
       <div className="max-w-lg mx-auto my-6 px-3">
         {/* Device Crash / Power Loss Recovery Card */}
@@ -979,7 +977,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                   Phát hiện bài thi đang làm dở dang trên máy tính này!
                 </h3>
                 <p className="text-xs text-white/95 leading-relaxed">
-                  Thí sinh: <strong>{deviceActiveExam.student.name}</strong> • SBD: <strong>{deviceActiveExam.student.id}</strong> • Lớp: <strong>{deviceActiveExam.student.className}</strong>
+                  Thí sinh: <strong data-preserve-content="true">{deviceActiveExam.student.name}</strong> • SBD: <strong data-preserve-content="true">{deviceActiveExam.student.id}</strong> • Lớp: <strong data-preserve-content="true">{deviceActiveExam.student.className}</strong>
                 </p>
                 <div className="text-[11px] bg-black/20 rounded-xl px-3 py-1.5 inline-block font-mono">
                   ⏱️ Còn lại {Math.floor(deviceActiveExam.remainingSeconds / 60)} phút • Đã làm {Object.keys(deviceActiveExam.answers).length} câu • Lưu lúc {new Date(deviceActiveExam.savedAt).toLocaleTimeString('vi-VN')}
@@ -1078,163 +1076,8 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
               )}
               <span>{isLookingUpCloud ? 'ĐANG TRA CỨU THÍ SINH...' : 'TIẾP TỤC & XÁC NHẬN THÔNG TIN THÍ SINH'}</span>
             </button>
-
-            {students.length > 0 && (
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => setShowLookupModal(true)}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <i className="fa-solid fa-address-book"></i> Quên hoặc cần xem danh sách Mã ID theo Lớp?
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="pt-4 border-t border-slate-100 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-600">
-                <i className="fa-solid fa-server text-emerald-600 mr-1"></i>Hạ tầng thi đồng thời (500+ thí sinh):
-              </span>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                Cách ly phiên độc lập
-              </span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1.5 leading-relaxed">
-              <div>
-                • Mỗi thiết bị/tab trình duyệt chạy phiên độc lập, <strong>không bị trùng lặp câu trả lời hoặc xung đột dữ liệu</strong>.
-              </div>
-              <div>
-                • <strong>Tự động lưu trên máy:</strong> Khi máy tính mất điện, mất mạng hay tắt đột ngột, toàn bộ bài làm sẽ được lưu an toàn trực tiếp trên máy và khôi phục khi mở lại.
-              </div>
-              <div>
-                • Bắt buộc xác nhận đúng <strong>Họ tên, Lớp và Trường</strong> ở bước tiếp theo trước khi chính thức mở đề thi.
-              </div>
-            </div>
-
-            {onRequestUnlockAdmin && (
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={onRequestUnlockAdmin}
-                  className="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 hover:border-amber-300 font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <i className="fa-solid fa-key text-amber-500"></i>
-                  <span>Bạn là Giám thị / Quản trị viên? Nhập PIN quay lại Admin</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
-
-        {/* Modal tra cứu mã ID theo Lớp */}
-        {showLookupModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] shadow-2xl flex flex-col border border-slate-200">
-              <div className="p-5 border-b border-slate-200 flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                    <i className="fa-solid fa-address-book text-blue-600"></i> Tra Cứu Mã ID Thí Sinh Theo Lớp
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Chọn nhanh lớp và tên của em để lấy đúng mã ID dự thi
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowLookupModal(false)}
-                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition"
-                >
-                  <i className="fa-solid fa-xmark"></i>
-                </button>
-              </div>
-
-              <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Lọc theo Lớp:</label>
-                  <select
-                    value={selectedClassFilter}
-                    onChange={(e) => setSelectedClassFilter(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">Tất cả các lớp ({students.length} thí sinh)</option>
-                    {availableClasses.map((cls) => (
-                      <option key={cls} value={cls}>
-                        Lớp {cls} ({students.filter((s) => s.className === cls).length} hs)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Tìm theo Tên hoặc Mã ID:</label>
-                  <input
-                    type="text"
-                    value={lookupSearch}
-                    onChange={(e) => setLookupSearch(e.target.value)}
-                    placeholder="Nhập tên học sinh..."
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="p-4 overflow-y-auto max-h-[50vh] divide-y divide-slate-100 space-y-2">
-                {filteredLookupStudents.length === 0 ? (
-                  <div className="text-center py-8 text-xs text-slate-500 font-semibold">
-                    Không tìm thấy học sinh nào phù hợp với bộ lọc!
-                  </div>
-                ) : (
-                  filteredLookupStudents.map((st) => (
-                    <div
-                      key={st.id}
-                      className="pt-2 flex items-center justify-between hover:bg-blue-50/50 p-2 rounded-xl transition"
-                    >
-                      <div>
-                        <div className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
-                          <span>{st.name}</span>
-                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold">
-                            {st.id}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          Lớp {st.className} • Trường {st.school}
-                          {st.score !== null && typeof st.score !== 'undefined' && (
-                            <span className="ml-2 font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                              Đã nộp bài ({st.score}đ)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginInputId(st.id);
-                          setShowLookupModal(false);
-                          handleLookupStudent(st.id);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition cursor-pointer shrink-0 ml-2"
-                      >
-                        Chọn & Xác Nhận <i className="fa-solid fa-arrow-right ml-1"></i>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="p-3 bg-slate-50 border-t border-slate-200 text-right">
-                <button
-                  type="button"
-                  onClick={() => setShowLookupModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-200 text-slate-700 font-bold text-xs transition cursor-pointer"
-                >
-                  Đóng
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1433,10 +1276,10 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm sm:text-base font-extrabold text-white truncate">
+              <span className="text-sm sm:text-base font-extrabold text-white truncate" data-preserve-content="true">
                 {currentStudent.name}
               </span>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-mono font-black text-xs">
+              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-mono font-black text-xs" data-preserve-content="true">
                 ID: {currentStudent.id}
               </span>
               {/* Realtime Local Save & Network Status */}
@@ -1460,12 +1303,12 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
             </div>
             <div className="text-xs text-slate-300 flex items-center gap-2 sm:gap-3 flex-wrap">
               <span>
-                Khối: <strong className="text-sky-300">{currentStudent.grade}</strong> - Lớp:{' '}
-                <strong className="text-sky-300">{currentStudent.className}</strong>
+                Khối: <strong className="text-sky-300" data-preserve-content="true">{currentStudent.grade}</strong> - Lớp:{' '}
+                <strong className="text-sky-300" data-preserve-content="true">{currentStudent.className}</strong>
               </span>
               <span>•</span>
               <span className="truncate">
-                Trường: <strong className="text-amber-300">{currentStudent.school}</strong>
+                Trường: <strong className="text-amber-300" data-preserve-content="true">{currentStudent.school}</strong>
               </span>
             </div>
           </div>
@@ -1522,7 +1365,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
           <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center gap-2.5">
             <i className="fa-solid fa-cloud-arrow-up text-emerald-600 text-lg shrink-0"></i>
             <div>
-              <strong>ĐÃ NỘP BÀI THÀNH CÔNG:</strong> Điểm thi của thí sinh <strong>{currentStudent.name}</strong> đã được chấm điểm tự động và gửi lưu vào hệ thống danh sách điểm chung.
+              <strong>ĐÃ NỘP BÀI THÀNH CÔNG:</strong> Điểm thi của thí sinh <strong data-preserve-content="true">{currentStudent.name}</strong> đã được chấm điểm tự động và gửi lưu vào hệ thống danh sách điểm chung.
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -1597,7 +1440,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         <div key={p.id} className="p-2 rounded-xl bg-white border border-blue-100 text-xs space-y-1">
                           <div className="flex items-center justify-between font-bold text-slate-800">
                             <span className="truncate max-w-[200px]" title={p.title}>
-                              Part {lIdx + 1}: {p.title}
+                              Part {lIdx + 1}: <span data-preserve-content="true">{p.title}</span>
                             </span>
                             <span className="text-blue-700 font-black shrink-0">
                               {rec.earnedPoints} / {p.points} đ
@@ -1650,7 +1493,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         <div key={p.id} className="p-2 rounded-xl bg-white border border-teal-100 text-xs space-y-1">
                           <div className="flex items-center justify-between font-bold text-slate-800">
                             <span className="truncate max-w-[200px]" title={p.title}>
-                              Part {rwIdx + 1}: {p.title}
+                              Part {rwIdx + 1}: <span data-preserve-content="true">{p.title}</span>
                             </span>
                             <span className="text-teal-700 font-black shrink-0">
                               {rec.earnedPoints} / {p.points} đ
@@ -1827,7 +1670,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 }`}
               >
                 <span>Part {globalPIdx + 1}</span>
-                <span className="truncate max-w-[110px]">{p.title}</span>
+                <span className="truncate max-w-[110px]" data-preserve-content="true">{p.title}</span>
                 <span
                   className={`px-1.5 py-0.2 rounded text-[10px] font-black ${
                     isCurrentPart ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
@@ -1939,7 +1782,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 </span>
                 <span className="text-white/40">➔</span>
                 <span className="px-2.5 py-0.5 rounded-md bg-white/15 text-white">
-                  Part {activeQInfo.partDisplayNumber}: {getCleanPartTitle(activePart.title)}
+                  Part {activeQInfo.partDisplayNumber}: <span data-preserve-content="true">{getCleanPartTitle(activePart.title)}</span>
                 </span>
                 <span className="text-white/40">➔</span>
                 <span className="px-2.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black">
@@ -1950,10 +1793,10 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm sm:text-base font-extrabold text-white">
-                    Part {activeQInfo.partDisplayNumber}: {getCleanPartTitle(activePart.title)}
+                    Part {activeQInfo.partDisplayNumber}: <span data-preserve-content="true">{getCleanPartTitle(activePart.title)}</span>
                   </h3>
                   {activePart.instructions && (
-                    <p className="text-xs text-slate-300 leading-relaxed font-medium mt-1">
+                    <p className="text-xs text-slate-300 leading-relaxed font-medium mt-1" data-preserve-content="true">
                       {activePart.instructions}
                     </p>
                   )}
@@ -2313,14 +2156,14 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         }`}>
                           Part {qInfo.partDisplayNumber}
                         </span>
-                        <h4 className="font-extrabold text-sm">{qPart.title}</h4>
+                        <h4 className="font-extrabold text-sm" data-preserve-content="true">{qPart.title}</h4>
                       </div>
                       <span className="text-xs font-bold px-2 py-0.5 rounded bg-white border border-slate-200">
                         Thang điểm Part: <strong>{qPart.points} đ</strong> ({qInfo.totalInPart} câu)
                       </span>
                     </div>
                     {qPart.instructions && (
-                      <p className="text-xs text-slate-600 font-medium">{qPart.instructions}</p>
+                      <p className="text-xs text-slate-600 font-medium" data-preserve-content="true">{qPart.instructions}</p>
                     )}
                     {qPart.audio && (
                       <div className="pt-2 border-t border-slate-200/80">
@@ -2375,10 +2218,10 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         <span className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center text-xs">
                           <i className="fa-solid fa-graduation-cap"></i>
                         </span>
-                        <span>{q.sectionTitle}</span>
+                        <span data-preserve-content="true">{q.sectionTitle}</span>
                       </div>
                       {q.exampleHint && (
-                        <span className="text-[11px] font-semibold text-blue-100 bg-black/20 px-2.5 py-0.5 rounded-md">
+                        <span className="text-[11px] font-semibold text-blue-100 bg-black/20 px-2.5 py-0.5 rounded-md" data-preserve-content="true">
                           {q.exampleHint}
                         </span>
                       )}
@@ -2440,6 +2283,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 {/* Question Prompt Text (renders HTML like <br>, <b>) */}
                 <div
                   className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed"
+                  data-preserve-content="true"
                   dangerouslySetInnerHTML={{ __html: q.q || '' }}
                 />
 
@@ -2543,7 +2387,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                 {String.fromCharCode(65 + optIdx)}
                               </span>
                             )}
-                            <span className={isYesNo ? 'text-base font-black uppercase' : 'text-sm'}>
+                            <span className={isYesNo ? 'text-base font-black uppercase' : 'text-sm'} data-preserve-content={op.text ? 'true' : undefined}>
                               {op.text || (isYesNo ? (isYesOpt ? 'YES' : 'NO') : `Phương án ${String.fromCharCode(65 + optIdx)}`)}
                             </span>
                           </div>
@@ -2595,7 +2439,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                               }}
                               className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500"
                             />
-                            <span className="text-sm font-semibold">{op.text}</span>
+                            <span className="text-sm font-semibold" data-preserve-content="true">{op.text}</span>
                           </label>
                         );
                       })}
@@ -2698,7 +2542,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                 <span className="px-2 py-0.2 rounded-full bg-emerald-600 text-white text-[10px]">ĐÃ NỐI SẴN</span>
                               </div>
                               <p className="text-[11px] text-emerald-800 font-semibold mt-0.5">
-                                Cặp <strong className="underline text-emerald-950">{pA?.text || pA?.label}</strong> ➔ <strong className="underline text-emerald-950">{pB?.text || pB?.label}</strong> đã được nối sẵn trên tranh để hướng dẫn cách làm. Em hãy nối các cặp còn lại!
+                                Cặp <strong className="underline text-emerald-950" data-preserve-content="true">{pA?.text || pA?.label}</strong> ➔ <strong className="underline text-emerald-950" data-preserve-content="true">{pB?.text || pB?.label}</strong> đã được nối sẵn trên tranh để hướng dẫn cách làm. Em hãy nối các cặp còn lại!
                               </p>
                             </div>
                           </div>
@@ -2876,6 +2720,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                               <div
                                 className="w-7 h-7 rounded-full text-white font-black flex items-center justify-center text-xs shadow-xs shrink-0"
                                 style={{ backgroundColor: q.connectPairs?.defaultColor || '#2563eb' }}
+                                data-preserve-content="true"
                               >
                                 {pt.label}
                               </div>
@@ -2891,7 +2736,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
 
                               {/* Attached Text / Word */}
                               {pt.text && (
-                                <span className="font-extrabold text-xs sm:text-sm text-slate-800 px-1 truncate max-w-[150px] pointer-events-none">
+                                <span className="font-extrabold text-xs sm:text-sm text-slate-800 px-1 truncate max-w-[150px] pointer-events-none" data-preserve-content="true">
                                   {pt.text}
                                 </span>
                               )}
@@ -2930,7 +2775,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
                           Câu miêu tả hình ảnh:
                         </div>
-                        <div className="text-base sm:text-lg font-black text-slate-900 leading-snug">
+                        <div className="text-base sm:text-lg font-black text-slate-900 leading-snug" data-preserve-content="true">
                           {q.q.replace(/<[^>]*>/g, '').replace(/^\d+[\.\)]\s*/, '')}
                         </div>
                         <p className="text-xs text-slate-500 mt-1 italic">
@@ -3064,7 +2909,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                     {isSubmitted && (
                       <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-center">
                         <strong>Đáp án chấp nhận:</strong>{' '}
-                        <span className="font-bold text-emerald-700">{(q.acceptableAnswers || []).join(' / ')}</span>
+                        <span className="font-bold text-emerald-700" data-preserve-content="true">{(q.acceptableAnswers || []).join(' / ')}</span>
                       </div>
                     )}
                   </div>
@@ -3230,14 +3075,14 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                             </span>
                             <span>
                               Từ tiếng Anh mục tiêu (Đáp án đúng):{' '}
-                              <strong className="font-mono text-sm uppercase tracking-wider text-emerald-700">
+                              <strong className="font-mono text-sm uppercase tracking-wider text-emerald-700" data-preserve-content="true">
                                 {target.toUpperCase()}
                               </strong>
                             </span>
                           </div>
                           {!isCorrect && currentWord && (
                             <div className="text-[11px] text-slate-500 pt-1 text-left">
-                              Em đã ghép: <strong className="font-mono uppercase text-rose-700">{currentWord}</strong>
+                              Em đã ghép: <strong className="font-mono uppercase text-rose-700" data-preserve-content="true">{currentWord}</strong>
                             </div>
                           )}
                         </div>
@@ -3322,7 +3167,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                     <i className="fa-solid fa-font"></i>
                                   </div>
                                 )}
-                                <span className="font-mono font-black text-sm text-slate-800 tracking-wide">
+                                <span className="font-mono font-black text-sm text-slate-800 tracking-wide" data-preserve-content="true">
                                   {wItem.word}
                                 </span>
                                 {isEx && (
@@ -3341,7 +3186,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                         {storyBank?.title && (
                           <h4 className="text-base sm:text-lg font-black text-slate-900 border-b pb-2 flex items-center gap-2">
                             <span>📖</span>
-                            <span>{storyBank.title}</span>
+                            <span data-preserve-content="true">{storyBank.title}</span>
                           </h4>
                         )}
 
@@ -3358,7 +3203,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                               {tokens.map((token, tIdx) => {
                                 const match = token.match(/\((\d+)\)/);
                                 if (!match) {
-                                  return <span key={tIdx}>{token}</span>;
+                                  return <span key={tIdx} data-preserve-content="true">{token}</span>;
                                 }
 
                                 const slotNum = match[1];
@@ -3376,7 +3221,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                     >
                                       {exImg && <img src={exImg} alt="" className="w-5 h-5 object-contain rounded" />}
                                       <span className="font-mono text-slate-500 text-xs">(0)</span>
-                                      <span className="underline decoration-2 decoration-slate-400 font-extrabold">{exWord}</span>
+                                      <span className="underline decoration-2 decoration-slate-400 font-extrabold" data-preserve-content="true">{exWord}</span>
                                       <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-wider">
                                         Ví dụ
                                       </span>
@@ -3414,7 +3259,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                   >
                                     <span className="font-mono text-xs opacity-70">({slotNum})</span>
                                     {userVal ? (
-                                      <span className="underline font-black text-blue-900">{userVal}</span>
+                                      <span className="underline font-black text-blue-900" data-preserve-content="true">{userVal}</span>
                                     ) : (
                                       <span className="text-slate-400 font-mono tracking-widest">______</span>
                                     )}
@@ -3423,7 +3268,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                                       <span className="text-xs text-red-700 flex items-center gap-1">
                                         <i className="fa-solid fa-circle-xmark text-red-500"></i>
                                         <span className="text-[11px] font-bold bg-white px-1.5 py-0.5 rounded border border-red-300 text-emerald-800">
-                                          Đáp án: {correctVal}
+                                          Đáp án: <span data-preserve-content="true">{correctVal}</span>
                                         </span>
                                       </span>
                                     )}
@@ -3464,11 +3309,11 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
 
                             <div className="text-[11px] text-slate-600 font-mono flex flex-wrap gap-2 pt-2 border-t border-slate-200">
                               <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-slate-700">
-                                (0) Ví dụ: <strong>{storyBank?.example?.word || correctAnswers['0'] || 'birthday'}</strong>
+                                (0) Ví dụ: <strong data-preserve-content="true">{storyBank?.example?.word || correctAnswers['0'] || 'birthday'}</strong>
                               </span>
                               {testSlots.map((k) => (
                                 <span key={k} className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-slate-800">
-                                  ({k}): <strong className="text-emerald-800">{correctAnswers[k]}</strong>{' '}
+                                  ({k}): <strong className="text-emerald-800" data-preserve-content="true">{correctAnswers[k]}</strong>{' '}
                                   <span className="text-[10px] text-slate-500">({formatPointsClean(sbBreakdown.slotPointsMap[k] ?? 0)}đ)</span>
                                 </span>
                               ))}
@@ -3864,7 +3709,7 @@ export const StudentExamPlayer: React.FC<StudentExamPlayerProps> = ({
                 CHÚC MỪNG EM ĐÃ HOÀN THÀNH!
               </h2>
               <p className="text-xs sm:text-sm text-slate-600">
-                Thí sinh: <strong>{currentStudent.name}</strong> • Lớp: <strong>{currentStudent.className}</strong> (ID: {currentStudent.id})
+                Thí sinh: <strong data-preserve-content="true">{currentStudent.name}</strong> • Lớp: <strong data-preserve-content="true">{currentStudent.className}</strong> (<span data-preserve-content="true">ID: {currentStudent.id}</span>)
               </p>
             </div>
 

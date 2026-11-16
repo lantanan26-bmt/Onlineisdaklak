@@ -247,6 +247,7 @@ export interface Teacher {
   name: string;          // Họ và tên giáo viên
   username: string;      // Tên đăng nhập
   password: string;      // Mật khẩu
+  passHash?: string;     // SHA-256 hash đồng bộ từ Cloud (bảo toàn mật khẩu khi không đọc subcollection private)
   email?: string;
   phone?: string;
   assignedGrades?: string[]; // Khối phụ trách (e.g. ['Khối 2', 'Khối 3'])
@@ -266,3 +267,14 @@ export interface GradeExamProfile {
   questions: Question[];
   updatedAt?: string;
 }
+
+export interface AppBranding {
+  appName: string;
+  appSubtitle?: string;
+  logoText?: string;
+  logoUrl?: string | null;
+  logoWidth?: number;
+  logoHeight?: number;
+  logoFit?: 'contain' | 'cover' | 'fill';
+}
+

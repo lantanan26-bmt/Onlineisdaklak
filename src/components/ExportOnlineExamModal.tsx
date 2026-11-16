@@ -104,7 +104,7 @@ export const ExportOnlineExamModal: React.FC<ExportOnlineExamModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100">
             <span className="text-[11px] font-bold text-indigo-700 block">Đề thi kích hoạt</span>
-            <span className="text-xs sm:text-sm font-black text-slate-900 block truncate" title={activeExam.title}>
+            <span className="text-xs sm:text-sm font-black text-slate-900 block truncate" title={activeExam.title} data-preserve-content="true">
               {activeExam.title}
             </span>
             <span className="text-[10px] text-slate-500 font-semibold">

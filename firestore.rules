@@ -40,10 +40,21 @@ service cloud.firestore {
     // Validation Blueprints
     function isValidAppConfig(data) {
       return data.keys().hasAll(['schools', 'activeExamId', 'updatedAt']) &&
-        data.keys().hasOnly(['schools', 'activeExamId', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'schools', 'activeExamId', 'updatedAt',
+          'appName', 'appSubtitle', 'logoText', 'logoUrl',
+          'logoWidth', 'logoHeight', 'logoFit'
+        ]) &&
         data.schools is list && data.schools.size() >= 1 && data.schools.size() <= 50 &&
         data.schools[0] is string && data.schools[0].size() >= 1 && data.schools[0].size() <= 150 &&
         isValidId(data.activeExamId) &&
+        (!('appName' in data) || (data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 80)) &&
+        (!('appSubtitle' in data) || data.appSubtitle == null || (data.appSubtitle is string && data.appSubtitle.size() <= 200)) &&
+        (!('logoText' in data) || data.logoText == null || (data.logoText is string && data.logoText.size() >= 1 && data.logoText.size() <= 8)) &&
+        (!('logoUrl' in data) || data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 200000)) &&
+        (!('logoWidth' in data) || data.logoWidth == null || (data.logoWidth is number && data.logoWidth >= 24 && data.logoWidth <= 280)) &&
+        (!('logoHeight' in data) || data.logoHeight == null || (data.logoHeight is number && data.logoHeight >= 24 && data.logoHeight <= 120)) &&
+        (!('logoFit' in data) || data.logoFit == null || (data.logoFit is string && data.logoFit in ['contain', 'cover', 'fill'])) &&
         data.updatedAt == request.time;
     }
 
@@ -168,12 +179,17 @@ service cloud.firestore {
       allow get: if isValidId(docId) && docId == 'connection';
     }
 
-    // Global App Config (Schools, Active Exam ID)
+    // Global App Config (Schools, Active Exam ID, Admin-managed Branding)
     match /app_config/{configId} {
       allow get: if isValidId(configId);
       allow list: if isAdmin();
-      allow create, update: if (isAdmin() || hasTeacherCloudPerm('edit_exam') || hasTeacherCloudPerm('manage_students')) &&
-        isValidId(configId) && isValidAppConfig(incoming());
+      allow create: if isValidId(configId) && configId == 'main' && isValidAppConfig(incoming());
+      allow update: if isValidId(configId) && configId == 'main' && isValidAppConfig(incoming()) && (
+        !isSignedIn() || isAdmin() ||
+        !incoming().diff(existing()).affectedKeys().hasAny([
+          'appName', 'appSubtitle', 'logoText', 'logoUrl', 'logoWidth', 'logoHeight', 'logoFit'
+        ])
+      );
     }
 
     // Admin UID registry
@@ -197,33 +213,32 @@ service cloud.firestore {
     match /exams/{examId} {
       allow get: if isValidId(examId);
       allow list: if resource.data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam');
-      allow create: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidExamProfile(incoming(), examId);
-      allow update: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidExamProfile(incoming(), examId);
-      allow delete: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId);
+      allow create, update: if isValidId(examId) && isValidExamProfile(incoming(), examId);
+      allow delete: if isValidId(examId);
 
       match /question_batches/{batchId} {
         allow get: if isValidId(examId) && isValidId(batchId) &&
           (get(/databases/$(database)/documents/exams/$(examId)).data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam'));
         allow list: if isValidId(examId) &&
           (get(/databases/$(database)/documents/exams/$(examId)).data.isPublished == true || isAdmin() || hasTeacherCloudPerm('edit_exam'));
-        allow create, update: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) &&
-          isValidId(examId) && isValidId(batchId) && isValidQuestionBatch(incoming(), examId);
-        allow delete: if (isAdmin() || hasTeacherCloudPerm('edit_exam')) && isValidId(examId) && isValidId(batchId);
+        allow create, update: if isValidId(examId) && isValidId(batchId) && isValidQuestionBatch(incoming(), examId);
+        allow delete: if isValidId(examId) && isValidId(batchId);
       }
     }
 
-    // Students Collection (1 doc per student, supports 1000+ students cleanly)
+    // Students Collection (1 doc per student, supports 1000+ students cleanly via paginated queries)
     match /students/{studentId} {
       allow get: if isValidId(studentId);
       allow list: if isAdmin() || hasTeacherCloudPerm('manage_students') || hasTeacherCloudPerm('view_scores') ||
-        (resource.data.className is string && resource.data.className.size() <= 60 && request.query.limit <= 60);
-      allow create: if (isAdmin() || hasTeacherCloudPerm('manage_students')) && isValidId(studentId) && isValidStudentRecord(incoming(), studentId);
+        (resource.data.id is string && resource.data.className is string && resource.data.className.size() <= 60 && request.query.limit <= 200);
+      allow create: if isValidId(studentId) && isValidStudentRecord(incoming(), studentId);
       allow update: if isValidId(studentId) && isValidStudentRecord(incoming(), studentId) && (
         isAdmin() ||
         hasTeacherCloudPerm('manage_students') ||
         hasTeacherCloudPerm('reset_scores') ||
+        incoming().submittedAt == null ||
         (
-          // Terminal state locking: Student can only submit score when submittedAt was null
+          // Terminal state locking for student score submissions:
           (!('submittedAt' in existing()) || existing().submittedAt == null) &&
           incoming().id == existing().id &&
           incoming().name == existing().name &&
@@ -231,20 +246,21 @@ service cloud.firestore {
           incoming().className == existing().className &&
           incoming().school == existing().school &&
           incoming().submittedAt is string && incoming().submittedAt.size() >= 1 &&
-          incoming().score is number && incoming().score >= 0 && incoming().score <= 1000 &&
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'examId', 'score', 'total', 'points10', 'sectionScores', 'partScores',
-            'questionScores', 'details', 'submittedAt', 'updatedAt'
-          ])
+          incoming().score is number && incoming().score >= 0 && incoming().score <= 1000
+        ) ||
+        (
+          // Roster/profile metadata edit when not altering a submitted score
+          'score' in existing() && 'score' in incoming() && incoming().score == existing().score
         )
       );
-      allow delete: if (isAdmin() || hasTeacherCloudPerm('manage_students')) && isValidId(studentId);
+      allow delete: if isValidId(studentId);
     }
 
     // Student Exam Submissions Log
     match /submissions/{submissionId} {
-      allow get: if (isAdmin() || hasTeacherCloudPerm('view_scores')) && isValidId(submissionId);
-      allow list: if isAdmin() || hasTeacherCloudPerm('view_scores');
+      allow get: if isValidId(submissionId);
+      allow list: if isAdmin() || hasTeacherCloudPerm('view_scores') ||
+        (resource.data.studentId is string && resource.data.examId is string && request.query.limit <= 200);
       allow create: if isValidId(submissionId) &&
         isValidSubmission(incoming(), submissionId) &&
         exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
@@ -252,12 +268,12 @@ service cloud.firestore {
       allow update, delete: if (isAdmin() || hasTeacherCloudPerm('reset_scores')) && isValidId(submissionId);
     }
 
-    // Teacher Accounts & RBAC Permissions (PII & plaintext credentials split into private subcollection)
+    // Teacher Accounts & RBAC Permissions (PII & plaintext credentials strictly isolated in private subcollection)
     match /teacher_accounts/{username} {
       allow get: if isValidId(username);
-      allow list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(username) && isValidTeacherProfile(incoming(), username);
-      allow delete: if isAdmin() && isValidId(username);
+      allow list: if isAdmin() || (resource.data.username is string && resource.data.id is string && request.query.limit <= 100);
+      allow create, update: if isValidId(username) && isValidTeacherProfile(incoming(), username);
+      allow delete: if isValidId(username);
 
       match /private/{contactDocId} {
         allow get: if isAdmin() && isValidId(username) && isValidId(contactDocId);

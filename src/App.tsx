@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ViewMode, Question, Student, ExamPart, PartScoreRecord, SectionScoreRecord, GradeExamProfile, Teacher, UserRole } from './types';
+import { AppBranding, ViewMode, Question, Student, ExamPart, PartScoreRecord, SectionScoreRecord, GradeExamProfile, Teacher, UserRole } from './types';
 import {
   getInitialQuestions,
   getInitialSchools,
@@ -28,12 +28,14 @@ import { PortalLanding } from './components/PortalLanding';
 import { TeacherManager } from './components/TeacherManager';
 import { ExamScoreManager } from './components/ExamScoreManager';
 import { ExportOnlineExamModal } from './components/ExportOnlineExamModal';
+import { AdminBrandingModal } from './components/AdminBrandingModal';
+import { LanguageToggleButton } from './components/LanguageToggleButton';
+import { useLanguage } from './contexts/LanguageContext';
 import { canonicalSortParts } from './utils/sectionUtils';
 import { saveToStorage, loadFromStorage, getInitialSyncStorage } from './utils/storage';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
 import {
-  BOOTSTRAP_ADMIN_EMAIL,
   checkCloudConnectionStatus,
   CloudInventorySummary,
   CloudSyncReport,
@@ -47,17 +49,88 @@ import {
   fetchTeachersForAdminFromCloud,
   formatCloudError,
   lookupStudentByIdFromCloud,
+  lookupStudentsByClassFromCloud,
+  lookupTeacherPublicByUsername,
   resetStudentsScoreInCloud,
-  saveAllExamsToCloud,
   saveAppConfigToCloud,
+  saveGradeExamToCloud,
   saveTeachersToCloud,
-  signInWithGoogleCloud,
-  signOutGoogleCloud,
   submitStudentScoreToCloud,
   syncAllDataToCloud,
   syncStudentsBatchToCloud,
   verifyTeacherLoginFromCloud,
 } from './services/firebaseService';
+
+function mergeExamsList(
+  local: GradeExamProfile[],
+  cloud: GradeExamProfile[],
+  dirtyExamIds: Set<string>
+): GradeExamProfile[] {
+  if (!cloud || cloud.length === 0) return local;
+  const localMap = new Map(local.map((e) => [e.id, e]));
+  const merged = cloud.map((ce) => {
+    if (dirtyExamIds.has(ce.id) && localMap.has(ce.id)) {
+      return localMap.get(ce.id)!;
+    }
+    return ce;
+  });
+  const cloudIds = new Set(cloud.map((ce) => ce.id));
+  const extraDirtyLocal = local.filter((le) => !cloudIds.has(le.id) && dirtyExamIds.has(le.id));
+  return [...extraDirtyLocal, ...merged];
+}
+
+function mergeStudentsList(
+  local: Student[],
+  cloud: Student[],
+  hasLocalEdits: boolean
+): Student[] {
+  if (!cloud || cloud.length === 0) return local;
+  const localMap = new Map(local.map((s) => [s.id, s]));
+  if (!hasLocalEdits) {
+    const cloudMap = new Map(cloud.map((cs) => [cs.id, cs]));
+    const mergedCloud = cloud.map((cs) => {
+      const ls = localMap.get(cs.id);
+      if (ls && ls.submittedAt != null && cs.submittedAt == null) {
+        return { ...cs, ...ls };
+      }
+      return cs;
+    });
+    const unsyncedLocalScored = local.filter((ls) => !cloudMap.has(ls.id) && ls.submittedAt != null);
+    return [...mergedCloud, ...unsyncedLocalScored];
+  }
+  const map = new Map<string, Student>(local.map((s) => [s.id, s]));
+  for (const cs of cloud) {
+    const ls = map.get(cs.id);
+    if (!ls || (cs.submittedAt != null && ls.submittedAt == null)) {
+      map.set(cs.id, cs);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function mergeTeachersList(
+  local: Teacher[],
+  cloud: Teacher[],
+  hasLocalEdits: boolean
+): Teacher[] {
+  if (!cloud || cloud.length === 0) return local;
+  const localMap = new Map(local.map((t) => [t.username.toLowerCase(), t]));
+  const mergedCloud = cloud.map((ct) => {
+    const lt = localMap.get(ct.username.toLowerCase());
+    if (!lt) return ct;
+    return {
+      ...ct,
+      password: ct.password || lt.password || '',
+      passHash: ct.passHash || lt.passHash,
+      email: ct.email || lt.email,
+      phone: ct.phone || lt.phone,
+    };
+  });
+  if (!hasLocalEdits) return mergedCloud;
+  const cloudKeys = new Set(cloud.map((c) => c.username.toLowerCase()));
+  const extraLocal = local.filter((lt) => !cloudKeys.has(lt.username.toLowerCase()));
+  return [...mergedCloud, ...extraLocal];
+}
 
 interface ToastItem {
   id: string;
@@ -65,7 +138,18 @@ interface ToastItem {
   type: 'success' | 'warn' | 'error' | 'info';
 }
 
+const DEFAULT_APP_BRANDING: AppBranding = {
+  appName: 'iSMART LMS',
+  appSubtitle: 'Quản trị toàn diện: Ngân hàng đề, phân quyền giáo viên & liên kết trang thi học sinh',
+  logoText: 'iS',
+  logoUrl: null,
+  logoWidth: 40,
+  logoHeight: 40,
+  logoFit: 'contain',
+};
+
 export default function App() {
+  const { lang } = useLanguage();
   // Check URL parameters for standalone student portal
   const isStudentParam = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('role') === 'student';
@@ -105,7 +189,8 @@ export default function App() {
 
   // Setters that update the active grade exam inside gradeExams
   const setParts = useCallback((newParts: ExamPart[] | ((prev: ExamPart[]) => ExamPart[])) => {
-    hasLocalEditsRef.current = true;
+    dirtyRef.current.exams = true;
+    dirtyExamIdsRef.current.add(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
@@ -122,7 +207,8 @@ export default function App() {
   }, [activeExamId]);
 
   const setQuestions = useCallback((newQuestions: Question[] | ((prev: Question[]) => Question[])) => {
-    hasLocalEditsRef.current = true;
+    dirtyRef.current.exams = true;
+    dirtyExamIdsRef.current.add(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
@@ -139,7 +225,8 @@ export default function App() {
   }, [activeExamId]);
 
   const setExamMinutes = useCallback((newMinutes: number | ((prev: number) => number)) => {
-    hasLocalEditsRef.current = true;
+    dirtyRef.current.exams = true;
+    dirtyExamIdsRef.current.add(activeExamId);
     setGradeExams((prevExams) =>
       prevExams.map((e) => {
         if (e.id === activeExamId) {
@@ -168,6 +255,14 @@ export default function App() {
     return (!stored || stored === '1234') ? 'admin0911' : stored;
   });
 
+  const [appBranding, setAppBranding] = useState<AppBranding>(() => {
+    const stored = getInitialSyncStorage<AppBranding | null>('ismart_app_branding', null);
+    if (stored && typeof stored === 'object' && stored.appName) {
+      return { ...DEFAULT_APP_BRANDING, ...stored };
+    }
+    return DEFAULT_APP_BRANDING;
+  });
+
   const [lastSavedTime, setLastSavedTime] = useState<string>(() => {
     return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   });
@@ -179,7 +274,7 @@ export default function App() {
     let active = true;
     const hydrateFromIndexedDB = async () => {
       try {
-        const [savedGradeExams, savedActiveExamId, savedParts, savedQuestions, savedSchools, savedStudents, savedMinutes, savedPin, savedTeachers] = await Promise.all([
+        const [savedGradeExams, savedActiveExamId, savedParts, savedQuestions, savedSchools, savedStudents, savedMinutes, savedPin, savedTeachers, savedBranding] = await Promise.all([
           loadFromStorage<GradeExamProfile[] | null>('ismart_grade_exam_profiles', null),
           loadFromStorage<string | null>('ismart_active_grade_exam_id', null),
           loadFromStorage<ExamPart[] | null>('ismart_exam_parts', null),
@@ -188,7 +283,8 @@ export default function App() {
           loadFromStorage<Student[] | null>('ismart_students', null),
           loadFromStorage<number | null>('ismart_exam_minutes', null),
           loadFromStorage<string | null>('ismart_admin_pin', null),
-          loadFromStorage<Teacher[] | null>('ismart_teachers', null)
+          loadFromStorage<Teacher[] | null>('ismart_teachers', null),
+          loadFromStorage<AppBranding | null>('ismart_app_branding', null)
         ]);
 
         let hydratedExams = savedGradeExams && Array.isArray(savedGradeExams) && savedGradeExams.length > 0 ? savedGradeExams : null;
@@ -197,6 +293,7 @@ export default function App() {
         let hydratedStudents = savedStudents && Array.isArray(savedStudents) && savedStudents.length > 0 ? savedStudents : null;
         let hydratedTeachers = savedTeachers && Array.isArray(savedTeachers) && savedTeachers.length > 0 ? savedTeachers : null;
         let hydratedPin = savedPin;
+        let hydratedBranding = savedBranding && typeof savedBranding === 'object' && savedBranding.appName ? savedBranding : null;
 
         const hasLocalSavedState = Boolean(
           hydratedExams ||
@@ -243,6 +340,10 @@ export default function App() {
                     hydratedPin = snap.adminPin.trim();
                     await saveToStorage('ismart_admin_pin', hydratedPin);
                   }
+                  if (snap.branding && typeof snap.branding === 'object' && snap.branding.appName) {
+                    hydratedBranding = { ...DEFAULT_APP_BRANDING, ...snap.branding };
+                    await saveToStorage('ismart_app_branding', hydratedBranding);
+                  }
                 }
               }
             }
@@ -284,6 +385,9 @@ export default function App() {
         } else {
           setAdminPin('admin0911');
         }
+        if (hydratedBranding) {
+          setAppBranding({ ...DEFAULT_APP_BRANDING, ...hydratedBranding });
+        }
       } catch (err) {
         console.warn('Hydration from IndexedDB error:', err);
       } finally {
@@ -298,13 +402,14 @@ export default function App() {
     };
   }, []);
 
-  // Firebase Cloud Auth & Sync state
+  // Firebase Cloud Auth & Auto-Sync state
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudHealth, setCloudHealth] = useState<'checking' | 'connected' | 'offline'>('checking');
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [cloudInventory, setCloudInventory] = useState<CloudInventorySummary | null>(null);
   const [lastSyncReport, setLastSyncReport] = useState<CloudSyncReport | null>(null);
-  const hasLocalEditsRef = React.useRef<boolean>(false);
+  const dirtyRef = React.useRef({ config: false, exams: false, students: false, teachers: false });
+  const dirtyExamIdsRef = React.useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -313,7 +418,8 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // On startup after IndexedDB hydration, automatically connect & verify Firebase Cloud + pull published exams/config
+  // On startup after IndexedDB hydration, automatically connect to Firebase Cloud across ALL accounts,
+  // pull all exams, students, teachers, and config, and auto-seed empty Cloud collections silently.
   useEffect(() => {
     if (!isHydrated) return;
     let active = true;
@@ -324,25 +430,70 @@ export default function App() {
         return;
       }
       try {
-        const [health, cloudConfig, cloudExams] = await Promise.all([
-          checkCloudConnectionStatus(),
+        const health = await checkCloudConnectionStatus();
+        if (!active) return;
+        setCloudHealth(health.reachable ? 'connected' : 'offline');
+        if (!health.reachable) return;
+
+        const [cloudConfig, cloudExams, cloudStudents, cloudTeachers, inv] = await Promise.all([
           fetchAppConfigFromCloud().catch(() => null),
           fetchPublishedExamsFromCloud(gradeExams).catch(() => null),
+          fetchAllStudentsFromCloud().catch(() => null),
+          fetchTeachersForAdminFromCloud().catch(() => null),
+          fetchCloudInventorySummary().catch(() => null),
         ]);
         if (!active) return;
 
-        setCloudHealth(health.reachable ? 'connected' : 'offline');
+        if (inv) setCloudInventory(inv);
 
-        if (cloudConfig) {
+        if (cloudConfig && !dirtyRef.current.config) {
           if (cloudConfig.schools && cloudConfig.schools.length > 0) {
             setSchools(cloudConfig.schools);
           }
           if (cloudConfig.activeExamId) {
             setActiveExamId(cloudConfig.activeExamId);
           }
+          if (cloudConfig.branding) {
+            setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+          }
         }
         if (cloudExams && cloudExams.length > 0) {
-          setGradeExams(cloudExams);
+          setGradeExams((prev) => mergeExamsList(prev, cloudExams, dirtyExamIdsRef.current));
+        }
+        if (cloudStudents && cloudStudents.length > 0) {
+          setStudents((prev) => mergeStudentsList(prev, cloudStudents, dirtyRef.current.students));
+        }
+        if (cloudTeachers && cloudTeachers.length > 0) {
+          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, dirtyRef.current.teachers));
+        }
+
+        // If any collection is still empty on Cloud (e.g., fresh Firebase or new Netlify/Cloudflare deploy),
+        // silently populate ONLY the empty categories so all devices stay synchronized immediately.
+        const needSeedExams = !cloudExams || cloudExams.length === 0;
+        const needSeedStudents = !cloudStudents || cloudStudents.length === 0;
+        const needSeedTeachers = !cloudTeachers || cloudTeachers.length === 0;
+        const needSeedConfig = !cloudConfig;
+
+        if (needSeedConfig || needSeedExams || needSeedStudents || needSeedTeachers) {
+          const report = await syncAllDataToCloud({
+            schools,
+            activeExamId,
+            gradeExams,
+            students,
+            teachers,
+            branding: needSeedConfig ? appBranding : undefined,
+            ownerUid: cloudUser?.uid || 'auto-portal-boot',
+            cloudEmail: cloudUser?.email || null,
+            canSyncConfig: needSeedConfig || needSeedExams,
+            canSyncExams: needSeedExams,
+            canSyncStudents: needSeedStudents,
+            canSyncTeachers: needSeedTeachers,
+          }).catch(() => null);
+          if (active && report) {
+            setLastSyncReport(report);
+            const refreshedInv = await fetchCloudInventorySummary().catch(() => null);
+            if (active && refreshedInv) setCloudInventory(refreshedInv);
+          }
         }
       } catch {
         if (active) setCloudHealth('offline');
@@ -371,13 +522,17 @@ export default function App() {
 
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
 
-  // When Admin/Authorized Teacher connects Google Cloud, inspect Cloud & independently sync per collection
+  // Automatically synchronize Firebase Cloud whenever Admin or Teacher logs in (no Google sign-in required!)
   useEffect(() => {
-    if (!cloudUser || !isHydrated) return;
+    if (!isHydrated) return;
     if (currentUserRole !== 'admin' && currentUserRole !== 'teacher') return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudHealth('offline');
+      return;
+    }
     let active = true;
 
-    const syncAdminCloudData = async () => {
+    const syncPortalAccountCloudData = async () => {
       try {
         const inv = await fetchCloudInventorySummary();
         if (!active) return;
@@ -387,49 +542,50 @@ export default function App() {
         const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
         const canManageStudents = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students');
         const canManageTeachers = currentUserRole === 'admin';
-        const hasPendingLocal = hasLocalEditsRef.current;
 
-        // 1. Pull categories that ALREADY exist on Cloud (unless user made unpushed local edits)
-        if (!hasPendingLocal) {
-          const [cloudConfig, cloudExams, cloudStudents, cloudTeachers] = await Promise.all([
-            inv.schoolsCount > 0 ? fetchAppConfigFromCloud().catch(() => null) : Promise.resolve(null),
-            inv.examsCount > 0 ? fetchPublishedExamsFromCloud(gradeExams).catch(() => null) : Promise.resolve(null),
-            inv.studentsCount > 0 ? fetchAllStudentsFromCloud().catch(() => null) : Promise.resolve(null),
-            canManageTeachers && inv.teachersCount > 0
-              ? fetchTeachersForAdminFromCloud().catch(() => null)
-              : Promise.resolve(null),
-          ]);
-          if (!active) return;
+        // 1. Pull latest Cloud state for non-dirty categories
+        const [cloudConfig, cloudExams, cloudStudents, cloudTeachers] = await Promise.all([
+          !dirtyRef.current.config && inv.schoolsCount > 0 ? fetchAppConfigFromCloud().catch(() => null) : Promise.resolve(null),
+          inv.examsCount > 0 ? fetchPublishedExamsFromCloud(gradeExams).catch(() => null) : Promise.resolve(null),
+          inv.studentsCount > 0 ? fetchAllStudentsFromCloud().catch(() => null) : Promise.resolve(null),
+          inv.teachersCount > 0 ? fetchTeachersForAdminFromCloud().catch(() => null) : Promise.resolve(null),
+        ]);
+        if (!active) return;
 
-          if (cloudConfig) {
-            if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
-            if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
-          }
-          if (cloudExams && cloudExams.length > 0) {
-            setGradeExams(cloudExams);
-          }
-          if (cloudStudents && cloudStudents.length > 0) {
-            setStudents(cloudStudents);
-          }
-          if (cloudTeachers && cloudTeachers.length > 0) {
-            setTeachers(cloudTeachers);
+        if (cloudConfig && !dirtyRef.current.config) {
+          if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
+          if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
+          if (cloudConfig.branding) {
+            setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
           }
         }
+        if (cloudExams && cloudExams.length > 0) {
+          setGradeExams((prev) => mergeExamsList(prev, cloudExams, dirtyExamIdsRef.current));
+        }
+        if (cloudStudents && cloudStudents.length > 0) {
+          setStudents((prev) => mergeStudentsList(prev, cloudStudents, dirtyRef.current.students));
+        }
+        if (cloudTeachers && cloudTeachers.length > 0) {
+          setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, dirtyRef.current.teachers));
+        }
 
-        // 2. Push ONLY categories that are still empty on Cloud OR have local edits
-        const needPushExams = canEditExam && (inv.examsCount === 0 || hasPendingLocal);
-        const needPushStudents = canManageStudents && (inv.studentsCount === 0 || hasPendingLocal);
-        const needPushTeachers = canManageTeachers && (inv.teachersCount === 0 || hasPendingLocal);
+        // 2. Push ONLY categories that are empty on Cloud or have pending local edits
+        const needPushConfig = (canEditExam || canManageStudents) && (inv.schoolsCount === 0 || dirtyRef.current.config);
+        const needPushExams = canEditExam && (inv.examsCount === 0 || dirtyRef.current.exams || dirtyExamIdsRef.current.size > 0);
+        const needPushStudents = canManageStudents && (inv.studentsCount === 0 || dirtyRef.current.students);
+        const needPushTeachers = canManageTeachers && (inv.teachersCount === 0 || dirtyRef.current.teachers);
 
-        if (needPushExams || needPushStudents || needPushTeachers) {
+        if (needPushConfig || needPushExams || needPushStudents || needPushTeachers) {
           const report = await syncAllDataToCloud({
             schools,
             activeExamId,
             gradeExams,
             students,
             teachers,
-            ownerUid: cloudUser.uid,
-            cloudEmail: cloudUser.email,
+            branding: currentUserRole === 'admin' ? appBranding : undefined,
+            ownerUid: cloudUser?.uid || `portal-${currentUserRole}`,
+            cloudEmail: cloudUser?.email || null,
+            canSyncConfig: needPushConfig,
             canSyncExams: needPushExams,
             canSyncStudents: needPushStudents,
             canSyncTeachers: needPushTeachers,
@@ -437,22 +593,84 @@ export default function App() {
           if (!active) return;
           setLastSyncReport(report);
           if (report.errors.length === 0) {
-            hasLocalEditsRef.current = false;
+            if (needPushConfig) dirtyRef.current.config = false;
+            if (needPushExams) {
+              dirtyRef.current.exams = false;
+              dirtyExamIdsRef.current.clear();
+            }
+            if (needPushStudents) dirtyRef.current.students = false;
+            if (needPushTeachers) dirtyRef.current.teachers = false;
           }
-          const refreshed = await fetchCloudInventorySummary();
-          if (active) setCloudInventory(refreshed);
+          const refreshed = await fetchCloudInventorySummary().catch(() => null);
+          if (active && refreshed) setCloudInventory(refreshed);
         }
       } catch {
-        // Ignore if rules deny non-authorized Google account
+        // Keep working locally if Cloud is temporarily unreachable
       }
     };
 
-    syncAdminCloudData();
+    syncPortalAccountCloudData();
     return () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cloudUser, currentUserRole, isHydrated]);
+  }, [cloudUser, currentUserRole, currentTeacher?.username, isHydrated]);
+
+  // Automatic debounced background save for exam/config edits when Admin or authorized Teacher edits
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (currentUserRole !== 'admin' && currentUserRole !== 'teacher') return;
+
+    const hasDirtyConfig = dirtyRef.current.config;
+    const hasDirtyExams = dirtyRef.current.exams || dirtyExamIdsRef.current.size > 0;
+    if (!hasDirtyConfig && !hasDirtyExams) return;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudHealth('offline');
+      return;
+    }
+
+    const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
+    const canEditConfig =
+      currentUserRole === 'admin' || canEditExam || !!currentTeacher?.permissions.includes('manage_students');
+
+    const timer = window.setTimeout(async () => {
+      setIsCloudSyncing(true);
+      try {
+        if (hasDirtyConfig && canEditConfig) {
+          await saveAppConfigToCloud(schools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined);
+          dirtyRef.current.config = false;
+        }
+        if (hasDirtyExams && canEditExam) {
+          const targetIds =
+            dirtyExamIdsRef.current.size > 0 ? Array.from(dirtyExamIdsRef.current) : [activeExamId];
+          for (const exId of targetIds) {
+            const examObj = gradeExams.find((e) => e.id === exId);
+            if (examObj) {
+              await saveGradeExamToCloud(examObj, cloudUser?.uid || `portal-${currentUserRole}`);
+              dirtyExamIdsRef.current.delete(exId);
+            }
+          }
+          if (dirtyExamIdsRef.current.size === 0) {
+            dirtyRef.current.exams = false;
+          }
+        }
+        setCloudHealth('connected');
+        setLastSavedTime(
+          new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        );
+        const inv = await fetchCloudInventorySummary().catch(() => null);
+        if (inv) setCloudInventory(inv);
+      } catch (err) {
+        console.warn('Auto background Cloud sync error:', err);
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradeExams, schools, activeExamId, appBranding, currentUserRole, currentTeacher?.username, isHydrated, cloudUser]);
 
   useEffect(() => {
     try {
@@ -484,6 +702,7 @@ export default function App() {
       return null;
     }
   });
+  const [portalPendingStudent, setPortalPendingStudent] = useState<Student | null>(null);
 
   useEffect(() => {
     try {
@@ -504,6 +723,9 @@ export default function App() {
   const [isCameraGraderOpen, setIsCameraGraderOpen] = useState(false);
   const [isOfflinePrinterOpen, setIsOfflinePrinterOpen] = useState(false);
   const [isExportOnlineModalOpen, setIsExportOnlineModalOpen] = useState(false);
+  const [isBrandingModalOpen, setIsBrandingModalOpen] = useState(false);
+  const [isEditingSubtitle, setIsEditingSubtitle] = useState(false);
+  const [subtitleDraft, setSubtitleDraft] = useState('');
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean;
     title: string;
@@ -582,6 +804,16 @@ export default function App() {
     saveToStorage('ismart_admin_pin', adminPin);
   }, [adminPin, isHydrated]);
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.title = `${appBranding.appName || 'iSMART LMS'} - ${
+        lang === 'en' ? 'Exam & Management System' : 'Hệ Thống Thi & Quản Trị'
+      }`;
+    }
+    if (!isHydrated) return;
+    saveToStorage('ismart_app_branding', appBranding);
+  }, [appBranding, isHydrated, lang]);
+
   // Auto-sync any queued offline submissions when network is restored
   useEffect(() => {
     const handleSyncOfflineQueue = async () => {
@@ -593,9 +825,12 @@ export default function App() {
             const failedItems: any[] = [];
             for (const qItem of queue) {
               try {
+                const matchingStudent = students.find((s) => s.id === qItem.studentId);
+                const qExamId = qItem.examId || activeExamId;
+                const matchingExam = gradeExams.find((e) => e.id === qExamId);
                 await submitStudentScoreToCloud({
                   studentId: qItem.studentId,
-                  examId: qItem.examId || activeExamId,
+                  examId: qExamId,
                   score: qItem.totalEarnedPoints,
                   total: qItem.maxExamPoints,
                   points10: qItem.pts10,
@@ -606,6 +841,18 @@ export default function App() {
                   questionScores: qItem.questionScores,
                   details: qItem.userAnswers,
                   sectionScores: qItem.sectionScores,
+                  studentMeta:
+                    qItem.studentMeta ||
+                    (matchingStudent
+                      ? {
+                          name: matchingStudent.name,
+                          grade: matchingStudent.grade,
+                          className: matchingStudent.className,
+                          school: matchingStudent.school,
+                          examId: qExamId,
+                        }
+                      : undefined),
+                  examMeta: matchingExam,
                 });
               } catch {
                 failedItems.push(qItem);
@@ -659,6 +906,7 @@ export default function App() {
 
   // Grade Exam Management Handlers
   const handleSelectGradeExam = (examId: string) => {
+    dirtyRef.current.config = true;
     setActiveExamId(examId);
     saveToStorage('ismart_active_grade_exam_id', examId);
     const target = gradeExams.find((e) => e.id === examId);
@@ -730,6 +978,9 @@ export default function App() {
       updatedAt: new Date().toLocaleDateString('vi-VN')
     };
 
+    dirtyRef.current.exams = true;
+    dirtyRef.current.config = true;
+    dirtyExamIdsRef.current.add(newId);
     setGradeExams((prev) => [newProfile, ...prev]);
     setActiveExamId(newId);
     saveToStorage('ismart_active_grade_exam_id', newId);
@@ -758,6 +1009,9 @@ export default function App() {
       updatedAt: new Date().toLocaleDateString('vi-VN')
     };
 
+    dirtyRef.current.exams = true;
+    dirtyRef.current.config = true;
+    dirtyExamIdsRef.current.add(newId);
     setGradeExams((prev) => [duplicated, ...prev]);
     setActiveExamId(newId);
     saveToStorage('ismart_active_grade_exam_id', newId);
@@ -765,6 +1019,8 @@ export default function App() {
   };
 
   const handleUpdateGradeExamMeta = (examId: string, patch: Partial<GradeExamProfile>) => {
+    dirtyRef.current.exams = true;
+    dirtyExamIdsRef.current.add(examId);
     setGradeExams((prev) =>
       prev.map((e) =>
         e.id === examId ? { ...e, ...patch, updatedAt: new Date().toLocaleDateString('vi-VN') } : e
@@ -778,34 +1034,18 @@ export default function App() {
       return;
     }
     const filtered = gradeExams.filter((e) => e.id !== examId);
+    dirtyExamIdsRef.current.delete(examId);
     setGradeExams(filtered);
     if (activeExamId === examId) {
       const nextId = filtered[0].id;
+      dirtyRef.current.config = true;
       setActiveExamId(nextId);
       saveToStorage('ismart_active_grade_exam_id', nextId);
     }
-    if (cloudUser) {
-      deleteExamFromCloud(examId).catch(() => {});
-    }
-    showToast('Đã xóa đề thi!', 'info');
-  };
-
-  // Connect Google Account for Firebase Cloud Admin/Teacher Sync
-  const handleConnectGoogleCloud = async () => {
-    setIsCloudSyncing(true);
-    try {
-      const res = await signInWithGoogleCloud();
-      showToast(
-        `☁️ Đã kết nối Firebase Cloud (${res.email})${
-          res.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase() ? ' • Quyền Admin Cloud' : ''
-        }!`,
-        'success'
-      );
-    } catch (err: any) {
-      showToast(`Không thể đăng nhập Google Cloud: ${formatCloudError(err)}`, 'error');
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    deleteExamFromCloud(examId).catch((err) => {
+      showToast(`Xóa đề thi trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+    });
+    showToast('Đã xóa đề thi và cập nhật Cloud!', 'info');
   };
 
   const handleRefreshCloudInventory = async () => {
@@ -813,6 +1053,7 @@ export default function App() {
     try {
       const inv = await fetchCloudInventorySummary();
       setCloudInventory(inv);
+      setCloudHealth(inv.errors.length === 0 ? 'connected' : cloudHealth);
       showToast(
         `☁️ Cloud hiện có: ${inv.examsCount} đề (${inv.examImagesCount} ảnh), ${inv.studentsCount} HS (${inv.scoredStudentsCount} có điểm), ${inv.teachersCount} GV.`,
         inv.errors.length > 0 ? 'warn' : 'info'
@@ -830,23 +1071,28 @@ export default function App() {
       const [cloudConfig, cloudExams, cloudStudents, cloudTeachers] = await Promise.all([
         fetchAppConfigFromCloud().catch(() => null),
         fetchPublishedExamsFromCloud([]).catch(() => null),
-        cloudUser ? fetchAllStudentsFromCloud().catch(() => null) : Promise.resolve(null),
-        cloudUser && currentUserRole === 'admin'
-          ? fetchTeachersForAdminFromCloud().catch(() => null)
-          : Promise.resolve(null),
+        fetchAllStudentsFromCloud().catch(() => null),
+        fetchTeachersForAdminFromCloud().catch(() => null),
       ]);
 
       if (cloudConfig) {
         if (cloudConfig.schools.length > 0) setSchools(cloudConfig.schools);
         if (cloudConfig.activeExamId) setActiveExamId(cloudConfig.activeExamId);
+        if (cloudConfig.branding) {
+          setAppBranding({ ...DEFAULT_APP_BRANDING, ...cloudConfig.branding });
+        }
       }
       if (cloudExams && cloudExams.length > 0) setGradeExams(cloudExams);
       if (cloudStudents && cloudStudents.length > 0) setStudents(cloudStudents);
-      if (cloudTeachers && cloudTeachers.length > 0) setTeachers(cloudTeachers);
+      if (cloudTeachers && cloudTeachers.length > 0) {
+        setTeachers((prev) => mergeTeachersList(prev, cloudTeachers, false));
+      }
 
       const inv = await fetchCloudInventorySummary();
       setCloudInventory(inv);
-      hasLocalEditsRef.current = false;
+      setCloudHealth('connected');
+      dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
+      dirtyExamIdsRef.current.clear();
       showToast(
         `⬇️ Đã tải từ Cloud: ${cloudExams?.length || 0} đề thi, ${cloudStudents?.length || 0} học sinh, ${cloudTeachers?.length || 0} giáo viên!`,
         'success'
@@ -858,7 +1104,7 @@ export default function App() {
     }
   };
 
-  // Explicit Manual Save & Sync (Local IndexedDB + Firebase Cloud Firestore)
+  // Explicit Manual Save & Sync (Local IndexedDB + Firebase Cloud Firestore across ALL accounts)
   const handleManualSaveAndSync = async () => {
     setIsSaving(true);
     setIsCloudSyncing(true);
@@ -872,26 +1118,23 @@ export default function App() {
         saveToStorage('ismart_students', students),
         saveToStorage('ismart_teachers', teachers),
         saveToStorage('ismart_exam_minutes', examMinutes),
-        saveToStorage('ismart_admin_pin', adminPin)
+        saveToStorage('ismart_admin_pin', adminPin),
+        saveToStorage('ismart_app_branding', appBranding)
       ]);
 
       const nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastSavedTime(nowStr);
 
-      if (!cloudUser) {
-        hasLocalEditsRef.current = true;
-        showToast(
-          `💾 Đã lưu trên máy (${nowStr}). Hãy bấm nút "Kết nối Cloud (Free)" ở góc trên để đẩy lên Firebase Cloud!`,
-          'warn'
-        );
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        dirtyRef.current = { config: true, exams: true, students: true, teachers: true };
+        setCloudHealth('offline');
+        showToast(`💾 Đang mất mạng — đã lưu tạm trên máy (${nowStr}) và sẽ tự đẩy Cloud khi có mạng!`, 'warn');
         return;
       }
 
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        hasLocalEditsRef.current = true;
-        showToast(`💾 Đang mất mạng — đã lưu tạm trên máy (${nowStr})!`, 'warn');
-        return;
-      }
+      const canEditExam = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam');
+      const canManageStudents = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students');
+      const canResetScores = currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('reset_scores');
 
       const report = await syncAllDataToCloud({
         schools,
@@ -899,19 +1142,23 @@ export default function App() {
         gradeExams,
         students,
         teachers,
-        ownerUid: cloudUser.uid,
-        cloudEmail: cloudUser.email,
-        canSyncExams: currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('edit_exam'),
-        canSyncStudents: currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('manage_students'),
+        branding: currentUserRole === 'admin' ? appBranding : undefined,
+        ownerUid: cloudUser?.uid || `portal-${currentUserRole}`,
+        cloudEmail: cloudUser?.email || null,
+        canSyncConfig: currentUserRole === 'admin' || canEditExam || canManageStudents,
+        canSyncExams: canEditExam,
+        canSyncStudents: canManageStudents || canResetScores,
         canSyncTeachers: currentUserRole === 'admin',
       });
       setLastSyncReport(report);
+      setCloudHealth('connected');
 
       const inv = await fetchCloudInventorySummary().catch(() => null);
       if (inv) setCloudInventory(inv);
 
       if (report.errors.length === 0) {
-        hasLocalEditsRef.current = false;
+        dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
+        dirtyExamIdsRef.current.clear();
         showToast(
           `☁️ Đã lưu Firebase Cloud: ${report.examsSaved} bài thi (${report.examImagesCount} ảnh), ${report.studentsSaved} HS (${report.scoredStudentsCount} có điểm), ${report.teachersSaved} GV lúc ${nowStr}!`,
           'success'
@@ -943,7 +1190,8 @@ export default function App() {
       schools,
       students,
       parts,
-      questions
+      questions,
+      branding: appBranding
     };
     if (includeSensitiveAuth) {
       backupData.adminPin = adminPin;
@@ -962,25 +1210,38 @@ export default function App() {
     );
   };
 
-  // Apply parsed snapshot object to state + IndexedDB
+  // Apply parsed snapshot object to state + IndexedDB + auto-sync Cloud
   const handleApplyFullSnapshot = async (parsed: any) => {
-    hasLocalEditsRef.current = true;
     if (Array.isArray(parsed)) {
+      dirtyRef.current.exams = true;
+      dirtyExamIdsRef.current.add(activeExamId);
       setQuestions(parsed);
       await saveToStorage('ismart_questions', parsed);
-      showToast(`Đã khôi phục ${parsed.length} câu hỏi từ dữ liệu JSON!`, 'success');
+      showToast(`Đã khôi phục ${parsed.length} câu hỏi và tự động đồng bộ lên Firebase Cloud!`, 'success');
       return;
     }
     if (!parsed || typeof parsed !== 'object') {
       showToast('Dữ liệu JSON không hợp lệ!', 'error');
       return;
     }
+
+    let nextExams = gradeExams;
+    let nextActiveExamId = activeExamId;
+    let nextSchools = schools;
+    let nextStudents = students;
+    let nextTeachers = teachers;
+
     if (Array.isArray(parsed.gradeExams) && parsed.gradeExams.length > 0) {
-      setGradeExams(parsed.gradeExams);
-      await saveToStorage('ismart_grade_exam_profiles', parsed.gradeExams);
+      nextExams = parsed.gradeExams;
+      dirtyRef.current.exams = true;
+      parsed.gradeExams.forEach((ex: GradeExamProfile) => dirtyExamIdsRef.current.add(ex.id));
+      setGradeExams(nextExams);
+      await saveToStorage('ismart_grade_exam_profiles', nextExams);
       if (parsed.activeExamId) {
-        setActiveExamId(parsed.activeExamId);
-        await saveToStorage('ismart_active_grade_exam_id', parsed.activeExamId);
+        nextActiveExamId = parsed.activeExamId;
+        dirtyRef.current.config = true;
+        setActiveExamId(nextActiveExamId);
+        await saveToStorage('ismart_active_grade_exam_id', nextActiveExamId);
       }
     } else {
       if (Array.isArray(parsed.parts) && parsed.parts.length > 0) {
@@ -993,16 +1254,22 @@ export default function App() {
       }
     }
     if (Array.isArray(parsed.schools)) {
-      setSchools(parsed.schools);
-      await saveToStorage('ismart_schools', parsed.schools);
+      nextSchools = parsed.schools;
+      dirtyRef.current.config = true;
+      setSchools(nextSchools);
+      await saveToStorage('ismart_schools', nextSchools);
     }
     if (Array.isArray(parsed.students)) {
-      setStudents(parsed.students);
-      await saveToStorage('ismart_students', parsed.students);
+      nextStudents = parsed.students;
+      dirtyRef.current.students = true;
+      setStudents(nextStudents);
+      await saveToStorage('ismart_students', nextStudents);
     }
     if (Array.isArray(parsed.teachers)) {
-      setTeachers(parsed.teachers);
-      await saveToStorage('ismart_teachers', parsed.teachers);
+      nextTeachers = parsed.teachers;
+      dirtyRef.current.teachers = true;
+      setTeachers(nextTeachers);
+      await saveToStorage('ismart_teachers', nextTeachers);
     }
     if (typeof parsed.examMinutes === 'number') {
       setExamMinutes(parsed.examMinutes);
@@ -1013,10 +1280,41 @@ export default function App() {
       setAdminPin(nextPin);
       await saveToStorage('ismart_admin_pin', nextPin);
     }
+    let nextBranding = appBranding;
+    if (parsed.branding && typeof parsed.branding === 'object' && parsed.branding.appName) {
+      nextBranding = { ...DEFAULT_APP_BRANDING, ...parsed.branding };
+      if (currentUserRole === 'admin') {
+        dirtyRef.current.config = true;
+      }
+      setAppBranding(nextBranding);
+      await saveToStorage('ismart_app_branding', nextBranding);
+    }
+
+    syncAllDataToCloud({
+      schools: nextSchools,
+      activeExamId: nextActiveExamId,
+      gradeExams: nextExams,
+      students: nextStudents,
+      teachers: nextTeachers,
+      branding: currentUserRole === 'admin' ? nextBranding : undefined,
+      ownerUid: cloudUser?.uid || `portal-${currentUserRole}`,
+      cloudEmail: cloudUser?.email || null,
+      canSyncConfig: true,
+      canSyncExams: true,
+      canSyncStudents: true,
+      canSyncTeachers: currentUserRole === 'admin',
+    })
+      .then((report) => {
+        setLastSyncReport(report);
+        if (report.errors.length === 0) {
+          dirtyRef.current = { config: false, exams: false, students: false, teachers: false };
+          dirtyExamIdsRef.current.clear();
+        }
+      })
+      .catch(() => {});
+
     showToast(
-      cloudUser
-        ? '✅ Đã nạp thành công snapshot! Bấm "Đẩy tất cả lên Cloud ngay" để lưu đồng bộ lên Firebase.'
-        : '✅ Đã nạp thành công toàn bộ đề thi, học sinh, điểm số & giáo viên từ file snapshot!',
+      '✅ Đã nạp thành công toàn bộ đề thi, học sinh, điểm số & giáo viên và đang tự động đồng bộ lên Cloud!',
       'success'
     );
   };
@@ -1075,7 +1373,7 @@ export default function App() {
       setCurrentStudent(null);
     }
     setCurrentMode(mode);
-    if (mode === 'scores' && cloudUser) {
+    if (mode === 'scores') {
       handleRefreshScoresFromCloud(true);
     }
   };
@@ -1131,6 +1429,7 @@ export default function App() {
         setCurrentUserRole('guest');
         setCurrentTeacher(null);
         setCurrentStudent(null);
+        setPortalPendingStudent(null);
         setIsStudentKioskLocked(false);
         setIsTestRunMode(false);
         sessionStorage.removeItem('ismart_user_role');
@@ -1147,34 +1446,16 @@ export default function App() {
   };
 
   const handleRefreshScoresFromCloud = async (silent = false) => {
-    if (!cloudUser) {
-      if (!silent) {
-        showToast('Hãy bấm "Kết nối Cloud (Free)" bằng tài khoản Admin/Giáo viên để tải điểm mới từ Cloud!', 'warn');
-      }
-      return;
-    }
     setIsCloudSyncing(true);
     try {
       const cloudStudents = await fetchAllStudentsFromCloud();
       if (cloudStudents && cloudStudents.length > 0) {
         setStudents((prev) => {
-          const cloudMap = new Map(cloudStudents.map((cs) => [cs.id, cs]));
-          const merged = prev.map((localStu) => {
-            const cloudStu = cloudMap.get(localStu.id);
-            if (!cloudStu) return localStu;
-            // Always prefer Cloud submitted score & answer details if student has submitted on Cloud
-            if (cloudStu.score !== null && cloudStu.score !== undefined) {
-              return { ...localStu, ...cloudStu };
-            }
-            return localStu;
-          });
-          // Add any Cloud students not yet in local list
-          const localIds = new Set(prev.map((s) => s.id));
-          const newOnes = cloudStudents.filter((cs) => !localIds.has(cs.id));
-          const finalList = [...merged, ...newOnes];
+          const finalList = mergeStudentsList(prev, cloudStudents, false);
           saveToStorage('ismart_students', finalList);
           return finalList;
         });
+        setCloudHealth('connected');
         if (!silent) {
           const scoredCount = cloudStudents.filter((s) => s.score !== null && s.score !== undefined).length;
           showToast(`☁️ Đã cập nhật Bảng Điểm từ Cloud (${scoredCount} bài thi đã có điểm & bài làm chi tiết)!`, 'success');
@@ -1251,7 +1532,17 @@ export default function App() {
       return updated;
     });
 
-    // Push graded exam score directly to Firebase Firestore (supports Cloudflare multi-device exams!)
+    // Push graded exam score directly to Firebase Firestore (automatic for every student account)
+    const studentMeta = targetStudent
+      ? {
+          name: targetStudent.name,
+          grade: targetStudent.grade,
+          className: targetStudent.className,
+          school: targetStudent.school,
+          examId: targetExam.id,
+        }
+      : undefined;
+
     if (typeof navigator === 'undefined' || navigator.onLine) {
       submitStudentScoreToCloud({
         studentId,
@@ -1264,6 +1555,8 @@ export default function App() {
         questionScores,
         details,
         sectionScores,
+        studentMeta,
+        examMeta: targetExam,
       }).catch(() => {
         // Queue for automatic retry if network drop happened right at submit
         try {
@@ -1280,12 +1573,34 @@ export default function App() {
             questionScores,
             userAnswers: details,
             sectionScores,
+            studentMeta,
           });
           localStorage.setItem('ismart_offline_submission_queue', JSON.stringify(queue));
         } catch {
           // ignore
         }
       });
+    } else {
+      try {
+        const queueRaw = localStorage.getItem('ismart_offline_submission_queue') || '[]';
+        const queue = JSON.parse(queueRaw);
+        queue.push({
+          studentId,
+          examId: targetExam.id,
+          totalEarnedPoints: score,
+          maxExamPoints: total,
+          pts10: points10,
+          submittedAt: new Date().toISOString(),
+          partScores,
+          questionScores,
+          userAnswers: details,
+          sectionScores,
+          studentMeta,
+        });
+        localStorage.setItem('ismart_offline_submission_queue', JSON.stringify(queue));
+      } catch {
+        // ignore
+      }
     }
   };
 
@@ -1302,29 +1617,24 @@ export default function App() {
     details: Record<number, any>;
   }) => {
     const nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-    let syncedStudentRecord: Student | null = null;
+    const trimmedTargetName = (studentData.name || '').trim().toLowerCase();
+    const trimmedTargetClass = (studentData.className || '').trim().toLowerCase();
+    const targetId = (studentData.studentId || '').trim().toLowerCase();
 
-    setStudents((prev) => {
-      const trimmedTargetName = (studentData.name || '').trim().toLowerCase();
-      const trimmedTargetClass = (studentData.className || '').trim().toLowerCase();
-      const targetId = (studentData.studentId || '').trim().toLowerCase();
+    const existing = students.find((s) => {
+      if (targetId && s.id.toLowerCase() === targetId) return true;
+      if (
+        trimmedTargetName &&
+        s.name.trim().toLowerCase() === trimmedTargetName &&
+        (!trimmedTargetClass || s.className.trim().toLowerCase() === trimmedTargetClass)
+      ) {
+        return true;
+      }
+      return false;
+    });
 
-      const existingIndex = prev.findIndex((s) => {
-        if (targetId && s.id.toLowerCase() === targetId) return true;
-        if (
-          trimmedTargetName &&
-          s.name.trim().toLowerCase() === trimmedTargetName &&
-          (!trimmedTargetClass || s.className.trim().toLowerCase() === trimmedTargetClass)
-        ) {
-          return true;
-        }
-        return false;
-      });
-
-      if (existingIndex >= 0) {
-        const updated = [...prev];
-        const existing = updated[existingIndex];
-        syncedStudentRecord = {
+    const syncedStudentRecord: Student = existing
+      ? {
           ...existing,
           name: studentData.name || existing.name,
           className: studentData.className || existing.className,
@@ -1335,12 +1645,9 @@ export default function App() {
           questionScores: studentData.questionScores,
           partScores: studentData.partScores,
           details: studentData.details,
-          submittedAt: `Chấm camera ${nowStr}`
-        };
-        updated[existingIndex] = syncedStudentRecord;
-        return updated;
-      } else {
-        syncedStudentRecord = {
+          submittedAt: `Chấm camera ${nowStr}`,
+        }
+      : {
           id: studentData.studentId || `HV-${Date.now().toString().slice(-4)}`,
           name: studentData.name || 'Học sinh chưa rõ tên',
           grade: activeExam?.grade || 'Khối 2',
@@ -1352,24 +1659,30 @@ export default function App() {
           questionScores: studentData.questionScores,
           partScores: studentData.partScores,
           details: studentData.details,
-          submittedAt: `Chấm camera ${nowStr}`
+          submittedAt: `Chấm camera ${nowStr}`,
         };
-        return [syncedStudentRecord, ...prev];
+
+    setStudents((prev) => {
+      const idx = prev.findIndex((s) => s.id === syncedStudentRecord.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = syncedStudentRecord;
+        return updated;
       }
+      return [syncedStudentRecord, ...prev];
     });
 
     if (studentData.school && !schools.includes(studentData.school)) {
+      dirtyRef.current.config = true;
       setSchools((prev) => [...prev, studentData.school]);
     }
 
-    hasLocalEditsRef.current = true;
-    if (cloudUser && syncedStudentRecord) {
-      syncStudentsBatchToCloud([syncedStudentRecord]).catch((err) => {
-        showToast(`Đã lưu điểm trên máy, chưa đẩy Cloud: ${formatCloudError(err)}`, 'warn');
-      });
-    }
+    syncStudentsBatchToCloud([syncedStudentRecord]).catch((err) => {
+      dirtyRef.current.students = true;
+      showToast(`Đã lưu điểm trên máy, chưa đẩy Cloud: ${formatCloudError(err)}`, 'warn');
+    });
 
-    showToast(`✅ Đã lưu kết quả chấm camera cho ${studentData.name} (${studentData.points10} điểm)!`, 'success');
+    showToast(`✅ Đã lưu kết quả chấm camera & đồng bộ Cloud cho ${studentData.name} (${studentData.points10} điểm)!`, 'success');
   };
 
   const handleQuickLoginFromTable = (student: Student) => {
@@ -1379,15 +1692,48 @@ export default function App() {
     showToast(`Đã chuyển thẳng vào phòng thi cho ${student.name}!`);
   };
 
+  const handleSaveAppBranding = async (nextBranding: AppBranding, customToast?: string) => {
+    if (currentUserRole !== 'admin') {
+      showToast('Chỉ Quản trị viên (Admin) mới có quyền thay đổi Logo & Tên hệ thống!', 'warn');
+      return;
+    }
+    setAppBranding(nextBranding);
+    await saveToStorage('ismart_app_branding', nextBranding);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      dirtyRef.current.config = true;
+      showToast('Đã lưu Logo & Tên hệ thống trên máy (sẽ tự đẩy Cloud khi có mạng)!', 'info');
+      return;
+    }
+
+    setIsCloudSyncing(true);
+    try {
+      await saveAppConfigToCloud(schools, activeExamId, nextBranding);
+      dirtyRef.current.config = false;
+      setCloudHealth('connected');
+      showToast(customToast || `✅ Đã cập nhật Logo & Tên "${nextBranding.appName}" và đồng bộ Cloud!`, 'success');
+    } catch (err) {
+      dirtyRef.current.config = true;
+      showToast(`Đã lưu trên máy, đồng bộ Cloud bị lỗi: ${formatCloudError(err)}`, 'warn');
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
   // Download Standalone Self-contained HTML
   const handleDownloadStandaloneHTML = () => {
+    const safeBrandName = (appBranding.appName || 'iSMART LMS').replace(/[<>&"]/g, '');
+    const safeLogoText = (appBranding.logoText || 'iS').replace(/[<>&"]/g, '');
+    const exportLogoW = Math.min(280, Math.max(24, Math.round(appBranding.logoWidth ?? 64)));
+    const exportLogoH = Math.min(120, Math.max(24, Math.round(appBranding.logoHeight ?? 64)));
     const dataPayload = JSON.stringify({
       examMinutes,
       adminPin,
       schools,
       students,
       parts,
-      questions
+      questions,
+      branding: appBranding
     });
 
     const htmlContent = `<!DOCTYPE html>
@@ -1395,7 +1741,7 @@ export default function App() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>iSMART LMS - Trang Thi Độc Lập Cho Học Sinh</title>
+  <title>${safeBrandName} - Trang Thi Độc Lập Cho Học Sinh</title>
   <script src="https://cdn.tailwindcss.com"><\/script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
@@ -1406,10 +1752,10 @@ export default function App() {
 </head>
 <body class="p-6">
   <div class="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-200 shadow-xl space-y-6 text-center">
-    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-3xl font-black mx-auto shadow-md">
-      iS
+    <div style="width:${exportLogoW}px;height:${exportLogoH}px" class="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-3xl font-black mx-auto shadow-md overflow-hidden">
+      ${safeLogoText}
     </div>
-    <h1 class="text-2xl font-black text-slate-900">HỆ THỐNG THI TRỰC TUYẾN iSMART LMS</h1>
+    <h1 class="text-2xl font-black text-slate-900">HỆ THỐNG THI TRỰC TUYẾN ${safeBrandName}</h1>
     <p class="text-sm text-slate-600 max-w-lg mx-auto">
       Gói đề thi độc lập gồm <strong>${questions.length} câu hỏi</strong>, thời gian làm bài <strong>${examMinutes} phút</strong>.
     </p>
@@ -1442,14 +1788,18 @@ export default function App() {
         <PortalLanding
           adminPin={adminPin}
           teachers={teachers}
+          students={students}
+          branding={appBranding}
           cloudHealth={cloudHealth}
           onLoginAdmin={() => {
+            setPortalPendingStudent(null);
             setCurrentUserRole('admin');
             setCurrentMode('admin');
             setIsStudentKioskLocked(false);
             showToast('Chào mừng Quản trị viên (Admin) đăng nhập hệ thống!', 'success');
           }}
           onLoginTeacher={(teacher) => {
+            setPortalPendingStudent(null);
             setCurrentUserRole('teacher');
             setCurrentTeacher(teacher);
             setIsStudentKioskLocked(false);
@@ -1467,7 +1817,10 @@ export default function App() {
             showToast(`Chào mừng ${teacher.name} đăng nhập Cổng Giáo Viên!`, 'success');
           }}
           onVerifyTeacherCloud={verifyTeacherLoginFromCloud}
-          onGoToStudentExam={() => {
+          onLookupTeacherPublicCloud={lookupTeacherPublicByUsername}
+          onLookupStudentCloud={lookupStudentByIdFromCloud}
+          onGoToStudentExam={(prefillStudent) => {
+            setPortalPendingStudent(prefillStudent || null);
             setCurrentUserRole('student');
             setIsStudentKioskLocked(true);
             setCurrentMode('test');
@@ -1610,18 +1963,53 @@ export default function App() {
         showToast={showToast}
       />
 
+      {/* Admin-only Branding Customization Modal */}
+      {currentUserRole === 'admin' && (
+        <AdminBrandingModal
+          isOpen={isBrandingModalOpen}
+          branding={appBranding}
+          defaultBranding={DEFAULT_APP_BRANDING}
+          onSave={handleSaveAppBranding}
+          onClose={() => setIsBrandingModalOpen(false)}
+          showToast={showToast}
+        />
+      )}
+
       {/* 1. Header for Standalone Student Mode */}
-      {isStudentKioskLocked ? (
+      {(() => {
+        const brandLogoW = Math.min(280, Math.max(24, Math.round(appBranding.logoWidth ?? 40)));
+        const brandLogoH = Math.min(120, Math.max(24, Math.round(appBranding.logoHeight ?? 40)));
+        const brandLogoFitClass =
+          appBranding.logoFit === 'fill' ? 'object-fill' : appBranding.logoFit === 'cover' ? 'object-cover' : 'object-contain';
+        const brandLogoFontPx = Math.max(13, Math.min(34, Math.round(Math.min(brandLogoH * 0.48, brandLogoW * 0.44))));
+        const brandLogoStyle = { width: `${brandLogoW}px`, height: `${brandLogoH}px` };
+
+        return isStudentKioskLocked ? (
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm sticky top-0 z-30">
           <div className="w-full px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/20">
-                iS
-              </div>
+              {appBranding.logoUrl ? (
+                <img
+                  src={appBranding.logoUrl}
+                  alt={appBranding.appName}
+                  style={brandLogoStyle}
+                  className={`rounded-xl ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-sm shrink-0`}
+                />
+              ) : (
+                <div
+                  style={{ ...brandLogoStyle, fontSize: `${brandLogoFontPx}px` }}
+                  className="rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-md shadow-blue-500/20 shrink-0 px-1.5 text-center leading-none overflow-hidden"
+                >
+                  {appBranding.logoText || 'iS'}
+                </div>
+              )}
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-                    HỆ THỐNG KIỂM TRA TRỰC TUYẾN
+                  <h1
+                    className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight"
+                    data-preserve-content={appBranding.appName ? 'true' : undefined}
+                  >
+                    {appBranding.appName || 'HỆ THỐNG KIỂM TRA TRỰC TUYẾN'}
                   </h1>
                   <span className="px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
                     <i className="fa-solid fa-shield-halved mr-1"></i>TRANG THI HỌC SINH ĐỘC LẬP
@@ -1633,28 +2021,20 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <LanguageToggleButton variant="light" />
               <span className="hidden sm:flex px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>Đã kết nối máy chủ Admin</span>
               </span>
               <button
                 type="button"
-                onClick={() => setIsPinModalOpen(true)}
-                title="Quản trị viên / Giám thị: Bấm để nhập mật khẩu Admin quay lại trang Quản trị Soạn Đề"
-                className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-black text-xs sm:text-sm shadow-md shadow-orange-500/25 transition flex items-center gap-2 cursor-pointer active:scale-95"
-              >
-                <i className="fa-solid fa-key text-amber-200"></i>
-                <span>Trở về Admin (Nhập PIN)</span>
-              </button>
-              <button
-                type="button"
                 onClick={handleLogout}
                 title="Quay lại cổng chọn vai trò đăng nhập"
-                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+                aria-label="Quay lại cổng chọn vai trò đăng nhập"
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition flex items-center justify-center cursor-pointer"
               >
                 <i className="fa-solid fa-right-from-bracket"></i>
-                <span className="hidden md:inline">Đổi Vai Trò</span>
               </button>
             </div>
           </div>
@@ -1664,33 +2044,227 @@ export default function App() {
         <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-30">
           <div className="w-full px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/20">
-                iS
-              </div>
+              {currentUserRole === 'admin' ? (
+                <button
+                  type="button"
+                  onClick={() => setIsBrandingModalOpen(true)}
+                  title="Chỉ Admin: Nhấn để thay đổi Logo, Kích thước & Tên hệ thống"
+                  className="group relative shrink-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer"
+                >
+                  {appBranding.logoUrl ? (
+                    <img
+                      src={appBranding.logoUrl}
+                      alt={appBranding.appName}
+                      style={brandLogoStyle}
+                      className={`rounded-xl ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-sm group-hover:ring-2 group-hover:ring-amber-400 transition`}
+                    />
+                  ) : (
+                    <div
+                      style={{ ...brandLogoStyle, fontSize: `${brandLogoFontPx}px` }}
+                      className="rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-md shadow-blue-500/20 group-hover:brightness-110 transition px-1.5 text-center leading-none overflow-hidden"
+                    >
+                      {appBranding.logoText || 'iS'}
+                    </div>
+                  )}
+                  <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center shadow border border-white opacity-90 group-hover:scale-110 transition">
+                    <i className="fa-solid fa-pen"></i>
+                  </span>
+                </button>
+              ) : appBranding.logoUrl ? (
+                <img
+                  src={appBranding.logoUrl}
+                  alt={appBranding.appName}
+                  style={brandLogoStyle}
+                  className={`rounded-xl ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-sm shrink-0`}
+                />
+              ) : (
+                <div
+                  style={{ ...brandLogoStyle, fontSize: `${brandLogoFontPx}px` }}
+                  className="rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-md shadow-blue-500/20 shrink-0 px-1.5 text-center leading-none overflow-hidden"
+                >
+                  {appBranding.logoText || 'iS'}
+                </div>
+              )}
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-                    iSMART LMS
-                  </h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {currentUserRole === 'admin' ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsBrandingModalOpen(true)}
+                      title="Chỉ Admin: Nhấn để đổi tên hệ thống hoặc logo"
+                      data-preserve-content="true"
+                      className="text-left text-base sm:text-lg font-extrabold text-slate-900 tracking-tight hover:text-blue-700 transition cursor-pointer"
+                    >
+                      {appBranding.appName || 'iSMART LMS'}
+                    </button>
+                  ) : (
+                    <h1
+                      data-preserve-content="true"
+                      className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight"
+                    >
+                      {appBranding.appName || 'iSMART LMS'}
+                    </h1>
+                  )}
                   {currentUserRole === 'admin' ? (
                     <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
                       <i className="fa-solid fa-user-shield text-[10px]"></i> ADMIN
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-blue-100 text-blue-900 border border-blue-300 flex items-center gap-1">
-                      <i className="fa-solid fa-chalkboard-user text-[10px]"></i> {currentTeacher?.name || 'GIÁO VIÊN'}
+                      <i className="fa-solid fa-chalkboard-user text-[10px]"></i>{' '}
+                      <span data-preserve-content={currentTeacher?.name ? 'true' : undefined}>
+                        {currentTeacher?.name || 'GIÁO VIÊN'}
+                      </span>
                     </span>
                   )}
                   <span className="px-2 py-0.5 text-[11px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Đồng bộ Live</span>
                   </span>
+                  {currentUserRole === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => setIsBrandingModalOpen(true)}
+                      title="Chỉ Admin mới có quyền tùy chỉnh Logo và Tên hệ thống"
+                      className="px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <i className="fa-solid fa-pen-to-square text-[10px]"></i>
+                      <span>Đổi Logo / Tên</span>
+                    </button>
+                  )}
                 </div>
-                <p className="text-xs text-slate-500 hidden sm:block">
-                  {currentUserRole === 'admin'
-                    ? 'Quản trị toàn diện: Ngân hàng đề, phân quyền giáo viên & liên kết trang thi học sinh'
-                    : `Cổng Giáo Viên • Khối phụ trách: ${currentTeacher?.assignedGrades?.join(', ') || 'Chưa phân khối'}`}
-                </p>
+                {currentUserRole === 'admin' ? (() => {
+                  const adminSubtitle =
+                    appBranding.appSubtitle !== undefined
+                      ? appBranding.appSubtitle
+                      : (DEFAULT_APP_BRANDING.appSubtitle ?? '');
+
+                  if (isEditingSubtitle) {
+                    return (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const nextSub = subtitleDraft.trim().slice(0, 200);
+                          setIsEditingSubtitle(false);
+                          handleSaveAppBranding(
+                            { ...appBranding, appSubtitle: nextSub },
+                            nextSub
+                              ? '✅ Đã cập nhật dòng mô tả và đồng bộ Cloud!'
+                              : '🗑️ Đã xóa dòng mô tả và đồng bộ Cloud!'
+                          );
+                        }}
+                        className="hidden sm:flex items-center gap-1.5 mt-1 flex-wrap"
+                      >
+                        <input
+                          type="text"
+                          autoFocus
+                          maxLength={200}
+                          value={subtitleDraft}
+                          onChange={(e) => setSubtitleDraft(e.target.value)}
+                          placeholder="Nhập dòng mô tả... (để trống để xóa)"
+                          className="text-xs px-2.5 py-1 rounded-lg border border-blue-400 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[260px] max-w-md"
+                        />
+                        <button
+                          type="submit"
+                          className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold transition cursor-pointer"
+                          title="Lưu dòng mô tả"
+                        >
+                          <i className="fa-solid fa-check mr-1"></i>Lưu
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingSubtitle(false);
+                            handleSaveAppBranding(
+                              { ...appBranding, appSubtitle: '' },
+                              '🗑️ Đã xóa dòng mô tả và đồng bộ Cloud!'
+                            );
+                          }}
+                          className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition cursor-pointer"
+                          title="Xóa bỏ dòng mô tả này"
+                        >
+                          <i className="fa-solid fa-trash-can mr-1"></i>Xóa dòng
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingSubtitle(false)}
+                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold transition cursor-pointer"
+                          title="Hủy"
+                        >
+                          Hủy
+                        </button>
+                      </form>
+                    );
+                  }
+
+                  if (!adminSubtitle.trim()) {
+                    return (
+                      <div className="hidden sm:flex items-center mt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubtitleDraft('');
+                            setIsEditingSubtitle(true);
+                          }}
+                          title="Chỉ Admin: Thêm lại dòng mô tả dưới tên hệ thống"
+                          className="text-[11px] font-semibold text-slate-400 hover:text-blue-600 border border-dashed border-slate-200 hover:border-blue-300 rounded px-1.5 py-0.5 transition cursor-pointer flex items-center gap-1"
+                        >
+                          <i className="fa-solid fa-plus text-[9px]"></i>
+                          <span>Thêm dòng mô tả</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="hidden sm:flex items-center gap-1.5 group/subtitle">
+                      <p
+                        onClick={() => {
+                          setSubtitleDraft(adminSubtitle);
+                          setIsEditingSubtitle(true);
+                        }}
+                        title="Chỉ Admin: Nhấn để sửa dòng mô tả này"
+                        data-preserve-content={
+                          appBranding.appSubtitle &&
+                          appBranding.appSubtitle !== DEFAULT_APP_BRANDING.appSubtitle
+                            ? 'true'
+                            : undefined
+                        }
+                        className="text-xs text-slate-500 hover:text-blue-700 transition cursor-pointer"
+                      >
+                        {adminSubtitle}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSubtitleDraft(adminSubtitle);
+                          setIsEditingSubtitle(true);
+                        }}
+                        title="Chỉ Admin: Sửa dòng mô tả"
+                        className="opacity-60 group-hover/subtitle:opacity-100 p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition cursor-pointer text-[10px]"
+                      >
+                        <i className="fa-solid fa-pen"></i>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSaveAppBranding(
+                            { ...appBranding, appSubtitle: '' },
+                            '🗑️ Đã xóa dòng mô tả và đồng bộ Cloud!'
+                          )
+                        }
+                        title="Chỉ Admin: Xóa dòng mô tả này"
+                        className="opacity-60 group-hover/subtitle:opacity-100 p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer text-[10px]"
+                      >
+                        <i className="fa-solid fa-trash-can"></i>
+                      </button>
+                    </div>
+                  );
+                })() : (
+                  <p className="text-xs text-slate-500 hidden sm:block">
+                    {`Cổng Giáo Viên • Khối phụ trách: ${currentTeacher?.assignedGrades?.join(', ') || 'Chưa phân khối'}`}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1857,35 +2431,39 @@ export default function App() {
                 </button>
               )}
 
-              {/* Firebase Cloud Free-Tier Connection Button */}
-              {cloudUser ? (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
-                  <i className="fa-solid fa-cloud-check text-emerald-600"></i>
-                  <span className="hidden xl:inline max-w-[140px] truncate" title={cloudUser.email || ''}>
-                    {cloudUser.email}
-                  </span>
-                  <span className="xl:hidden">Cloud ✓</span>
-                  <button
-                    type="button"
-                    onClick={() => signOutGoogleCloud()}
-                    title="Ngắt kết nối Google Cloud"
-                    className="ml-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                  >
-                    <i className="fa-solid fa-power-off text-[11px]"></i>
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  disabled={isCloudSyncing}
-                  onClick={handleConnectGoogleCloud}
-                  title="Đăng nhập Google để bật đồng bộ miễn phí Firebase Cloud (5 bài thi + >1.000 học sinh)"
-                  className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-black text-xs sm:text-sm flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-60"
-                >
-                  <i className={`fa-brands fa-google text-amber-600 ${isCloudSyncing ? 'fa-spin' : ''}`}></i>
-                  <span>{isCloudSyncing ? 'Đang kết nối...' : 'Kết nối Cloud (Free)'}</span>
-                </button>
-              )}
+              {/* Automatic Firebase Cloud Sync Badge (Zero Prompts for All Accounts) */}
+              <div
+                title={
+                  cloudHealth === 'offline'
+                    ? 'Đang ngoại tuyến — dữ liệu lưu tạm trên máy và tự động đồng bộ khi có mạng'
+                    : 'Tự động kết nối & lưu dữ liệu trực tiếp lên Firebase Cloud cho mọi tài khoản'
+                }
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold ${
+                  cloudHealth === 'offline'
+                    ? 'bg-amber-50 border-amber-200 text-amber-800'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                }`}
+              >
+                <i
+                  className={`fa-solid ${
+                    isCloudSyncing
+                      ? 'fa-rotate fa-spin text-blue-600'
+                      : cloudHealth === 'offline'
+                      ? 'fa-wifi-slash text-amber-600'
+                      : 'fa-cloud-check text-emerald-600'
+                  }`}
+                ></i>
+                <span className="hidden xl:inline">
+                  {isCloudSyncing
+                    ? 'Đang đồng bộ Cloud...'
+                    : cloudHealth === 'offline'
+                    ? 'Ngoại tuyến (Tự lưu máy)'
+                    : 'Tự động lưu Cloud ✓'}
+                </span>
+                <span className="xl:hidden">
+                  {isCloudSyncing ? 'Sync...' : cloudHealth === 'offline' ? 'Offline' : 'Cloud ✓'}
+                </span>
+              </div>
 
               {(currentUserRole === 'admin' ||
                 currentTeacher?.permissions.includes('edit_exam') ||
@@ -1919,6 +2497,9 @@ export default function App() {
                 </button>
               )}
 
+              {/* UI Language Switcher (EN / VI) */}
+              <LanguageToggleButton variant="light" />
+
               {/* Logout Button */}
               <button
                 type="button"
@@ -1932,7 +2513,8 @@ export default function App() {
             </div>
           </div>
         </header>
-      )}
+        );
+      })()}
 
       {/* Main Content Area */}
       <main className="flex-1 w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
@@ -1979,16 +2561,13 @@ export default function App() {
             schools={schools}
             students={students}
             onSchoolsChange={(newSchools) => {
-              hasLocalEditsRef.current = true;
               setSchools(newSchools);
-              if (cloudUser) {
-                saveAppConfigToCloud(newSchools, activeExamId).catch((err) => {
-                  showToast(`Lưu DS trường lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                });
-              }
+              saveAppConfigToCloud(newSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined).catch((err) => {
+                dirtyRef.current.config = true;
+                showToast(`Lưu DS trường lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+              });
             }}
             onStudentsChange={(newStudents) => {
-              hasLocalEditsRef.current = true;
               const prevIds = new Set(students.map((s) => s.id));
               const nextIds = new Set(newStudents.map((s) => s.id));
               const removedIds = Array.from(prevIds).filter((id) => !nextIds.has(id));
@@ -1997,17 +2576,17 @@ export default function App() {
                 return !old || JSON.stringify(old) !== JSON.stringify(ns);
               });
               setStudents(newStudents);
-              if (cloudUser) {
-                if (changed.length > 0) {
-                  syncStudentsBatchToCloud(changed).catch((err) => {
-                    showToast(`Đồng bộ học sinh lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                  });
-                }
-                if (removedIds.length > 0) {
-                  deleteStudentsFromCloud(removedIds).catch((err) => {
-                    showToast(`Xóa học sinh trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                  });
-                }
+              if (changed.length > 0) {
+                syncStudentsBatchToCloud(changed).catch((err) => {
+                  dirtyRef.current.students = true;
+                  showToast(`Đồng bộ học sinh lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                });
+              }
+              if (removedIds.length > 0) {
+                deleteStudentsFromCloud(removedIds).catch((err) => {
+                  dirtyRef.current.students = true;
+                  showToast(`Xóa học sinh trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+                });
               }
             }}
             onQuickLogin={handleQuickLoginFromTable}
@@ -2017,16 +2596,13 @@ export default function App() {
                 'Khôi phục danh sách học sinh mẫu?',
                 'Danh sách sẽ được đặt lại theo các trường và học sinh mẫu.',
                 () => {
-                  hasLocalEditsRef.current = true;
                   const initSchools = getInitialSchools();
                   const initStudents = getInitialStudents();
                   setSchools(initSchools);
                   setStudents(initStudents);
-                  if (cloudUser) {
-                    saveAppConfigToCloud(initSchools, activeExamId).catch(() => {});
-                    syncStudentsBatchToCloud(initStudents).catch(() => {});
-                  }
-                  showToast('Đã khôi phục danh sách học sinh mẫu!');
+                  saveAppConfigToCloud(initSchools, activeExamId, currentUserRole === 'admin' ? appBranding : undefined).catch(() => {});
+                  syncStudentsBatchToCloud(initStudents).catch(() => {});
+                  showToast('Đã khôi phục danh sách học sinh mẫu và đồng bộ Cloud!');
                 }
               );
             }}
@@ -2043,12 +2619,11 @@ export default function App() {
             activeExamId={activeExamId}
             schools={schools}
             students={students}
-            isCloudConnected={!!cloudUser}
+            isCloudConnected={cloudHealth !== 'offline'}
             isRefreshingCloud={isCloudSyncing}
             onRefreshFromCloud={() => handleRefreshScoresFromCloud(false)}
             canResetScores={currentUserRole === 'admin' || !!currentTeacher?.permissions.includes('reset_scores')}
             onStudentsChange={(newStudents) => {
-              hasLocalEditsRef.current = true;
               const resetIds = newStudents
                 .filter((ns) => {
                   const old = students.find((os) => os.id === ns.id);
@@ -2057,8 +2632,9 @@ export default function App() {
                 .map((s) => s.id);
               setStudents(newStudents);
               saveToStorage('ismart_students', newStudents);
-              if (cloudUser && resetIds.length > 0) {
+              if (resetIds.length > 0) {
                 resetStudentsScoreInCloud(resetIds).catch((err) => {
+                  dirtyRef.current.students = true;
                   showToast(`Xóa điểm trên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
                 });
               }
@@ -2073,17 +2649,15 @@ export default function App() {
           <TeacherManager
             teachers={teachers}
             onUpdateTeachers={(newTeachers) => {
-              hasLocalEditsRef.current = true;
               const nextUsernames = new Set(newTeachers.map((t) => t.username.toLowerCase()));
               const removedTeachers = teachers.filter((t) => !nextUsernames.has(t.username.toLowerCase()));
               setTeachers(newTeachers);
               saveToStorage('ismart_teachers', newTeachers);
-              if (cloudUser) {
-                saveTeachersToCloud(newTeachers).catch((err) => {
-                  showToast(`Lưu danh sách GV lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
-                });
-                removedTeachers.forEach((rt) => deleteTeacherFromCloud(rt).catch(() => {}));
-              }
+              saveTeachersToCloud(newTeachers).catch((err) => {
+                dirtyRef.current.teachers = true;
+                showToast(`Lưu danh sách GV lên Cloud lỗi: ${formatCloudError(err)}`, 'warn');
+              });
+              removedTeachers.forEach((rt) => deleteTeacherFromCloud(rt).catch(() => {}));
             }}
             showToast={showToast}
             openConfirm={openConfirm}
@@ -2104,13 +2678,18 @@ export default function App() {
               examMinutes={playerExam.examMinutes}
               isTestRun={isTestRunMode}
               initialPartId={testRunInitialPartId}
+              initialPendingStudent={isTestRunMode ? null : portalPendingStudent}
               onExitTestRun={handleExitTestRun}
-              onLoginStudent={(stu) => setCurrentStudent(stu)}
+              onLoginStudent={(stu) => {
+                setPortalPendingStudent(null);
+                setCurrentStudent(stu);
+              }}
               onLogoutStudent={() => {
                 if (isTestRunMode) {
                   handleExitTestRun();
                 } else {
                   setCurrentStudent(null);
+                  setPortalPendingStudent(null);
                   setCurrentUserRole('guest');
                   setIsStudentKioskLocked(false);
                   showToast('Đã quay về trang đăng nhập!');
@@ -2119,6 +2698,7 @@ export default function App() {
               onUpdateStudentScore={handleUpdateStudentScore}
               onRequestUnlockAdmin={() => setIsPinModalOpen(true)}
               onLookupStudentCloud={lookupStudentByIdFromCloud}
+              onLookupClassStudentsCloud={lookupStudentsByClassFromCloud}
               showToast={showToast}
               openConfirm={openConfirm}
             />
@@ -2141,7 +2721,6 @@ export default function App() {
             isCloudSyncing={isCloudSyncing}
             cloudInventory={cloudInventory}
             lastSyncReport={lastSyncReport}
-            onConnectCloud={handleConnectGoogleCloud}
             onPushAllToCloud={handleManualSaveAndSync}
             onPullAllFromCloud={handlePullAllFromCloud}
             onRefreshCloudInventory={handleRefreshCloudInventory}

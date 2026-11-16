@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Question, QuestionType, FillBlankBox, ConnectPairPoint, ColourItem, ExamPart, GradeExamProfile } from '../types';
 import { getAdvancedGrade2Questions, getAdvancedGrade2Parts, GRADE2_MEDIA } from '../demoData';
 import { QuestionAudioEditor } from './QuestionAudioEditor';
@@ -81,6 +81,104 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [draggingPoint, setDraggingPoint] = useState<{ qIdx: number; pIdx: number } | null>(null);
   const [selectedColourSpot, setSelectedColourSpot] = useState<{ qIdx: number; itemIdx: number } | null>(null);
+  const [activeColourDrag, setActiveColourDrag] = useState<{
+    qIdx: number;
+    itemIdx: number;
+    mode: 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+    startClientX: number;
+    startClientY: number;
+    initItem: ColourItem;
+    stageWidthPx: number;
+    stageHeightPx: number;
+    canvasW: number;
+    canvasH: number;
+    moved: boolean;
+  } | null>(null);
+  const colourStageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const questionsRef = useRef<Question[]>(questions);
+  questionsRef.current = questions;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!activeColourDrag) return;
+    const MIN_SIZE = 20;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const dxPx = e.clientX - activeColourDrag.startClientX;
+      const dyPx = e.clientY - activeColourDrag.startClientY;
+      if (!activeColourDrag.moved && Math.hypot(dxPx, dyPx) < 3) return;
+      activeColourDrag.moved = true;
+
+      const dx = (dxPx / Math.max(1, activeColourDrag.stageWidthPx)) * activeColourDrag.canvasW;
+      const dy = (dyPx / Math.max(1, activeColourDrag.stageHeightPx)) * activeColourDrag.canvasH;
+      const init = activeColourDrag.initItem;
+      const initW = Math.max(MIN_SIZE, init.w || 64);
+      const initH = Math.max(MIN_SIZE, init.h || 64);
+      const W = activeColourDrag.canvasW;
+      const H = activeColourDrag.canvasH;
+
+      let nextX = init.x;
+      let nextY = init.y;
+      let nextW = initW;
+      let nextH = initH;
+
+      if (activeColourDrag.mode === 'move') {
+        nextX = Math.round(Math.max(0, Math.min(W, init.x + dx)));
+        nextY = Math.round(Math.max(0, Math.min(H, init.y + dy)));
+      } else {
+        let left = init.x - initW / 2;
+        let right = init.x + initW / 2;
+        let top = init.y - initH / 2;
+        let bottom = init.y + initH / 2;
+        const m = activeColourDrag.mode;
+
+        if (m.includes('e')) {
+          right = Math.max(left + MIN_SIZE, Math.min(W, right + dx));
+        }
+        if (m.includes('w')) {
+          left = Math.min(right - MIN_SIZE, Math.max(0, left + dx));
+        }
+        if (m.includes('s')) {
+          bottom = Math.max(top + MIN_SIZE, Math.min(H, bottom + dy));
+        }
+        if (m.includes('n')) {
+          top = Math.min(bottom - MIN_SIZE, Math.max(0, top + dy));
+        }
+
+        nextW = Math.round(right - left);
+        nextH = Math.round(bottom - top);
+        nextX = Math.round((left + right) / 2);
+        nextY = Math.round((top + bottom) / 2);
+      }
+
+      const currentQuestions = questionsRef.current;
+      const targetQ = currentQuestions[activeColourDrag.qIdx];
+      if (!targetQ?.listenColour) return;
+      const nextItems = targetQ.listenColour.items.map((it, i) =>
+        i === activeColourDrag.itemIdx ? { ...it, x: nextX, y: nextY, w: nextW, h: nextH } : it
+      );
+      const nextQuestions = currentQuestions.map((qItem, qi) =>
+        qi === activeColourDrag.qIdx
+          ? { ...qItem, listenColour: { ...qItem.listenColour!, items: nextItems } }
+          : qItem
+      );
+      onChangeRef.current(nextQuestions);
+    };
+
+    const handlePointerUp = () => {
+      setActiveColourDrag(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [activeColourDrag]);
   const [pairInputs, setPairInputs] = useState<Record<number, { p1: string; p2: string }>>({});
   const [newPairDrafts, setNewPairDrafts] = useState<
     Record<
@@ -1218,14 +1316,14 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             >
                               <optgroup label="🎧 PHẦN THI LISTENING">
                                 {listeningParts.map(({ p }, lIdx) => (
-                                  <option key={p.id} value={p.id}>
+                                  <option key={p.id} value={p.id} data-preserve-content="true">
                                     Part {lIdx + 1}: {getCleanPartTitle(p.title).slice(0, 24)}... ({p.points}đ)
                                   </option>
                                 ))}
                               </optgroup>
                               <optgroup label="📖 PHẦN THI READING & WRITING">
                                 {readingWritingParts.map(({ p }, rwIdx) => (
-                                  <option key={p.id} value={p.id}>
+                                  <option key={p.id} value={p.id} data-preserve-content="true">
                                     Part {rwIdx + 1}: {getCleanPartTitle(p.title).slice(0, 24)}... ({p.points}đ)
                                   </option>
                                 ))}
@@ -2785,12 +2883,13 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                         <span
                                           className="w-6 h-6 rounded-full text-white font-black text-xs flex items-center justify-center shrink-0 shadow-xs font-mono"
                                           style={{ backgroundColor: q.connectPairs?.defaultColor || '#2563eb' }}
+                                          data-preserve-content="true"
                                         >
                                           {pt.label}
                                         </span>
                                         <div className="min-w-0">
                                           <div className="flex items-center gap-1.5 flex-wrap">
-                                            <span className="font-extrabold text-slate-800 text-xs truncate max-w-[140px]">
+                                            <span className="font-extrabold text-slate-800 text-xs truncate max-w-[140px]" data-preserve-content={pt.text ? 'true' : undefined}>
                                               {pt.text || `Điểm [${pt.label}]`}
                                             </span>
                                             <span className="text-[10px] text-slate-400 font-mono">
@@ -2986,7 +3085,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                 className="w-7 h-7 rounded-full text-white font-black flex items-center justify-center text-xs shadow-xs shrink-0 relative"
                                 style={{ backgroundColor: q.connectPairs?.defaultColor || '#2563eb' }}
                               >
-                                {pt.label}
+                                <span data-preserve-content="true">{pt.label}</span>
                                 {isDuplicate && (
                                   <span
                                     className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-rose-600 text-white text-[8px] font-black flex items-center justify-center shadow-xs"
@@ -3008,7 +3107,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
 
                               {/* Attached Text / Word */}
                               {pt.text && (
-                                <span className="font-bold text-xs text-slate-800 pr-1 truncate max-w-[130px] pointer-events-none">
+                                <span className="font-bold text-xs text-slate-800 pr-1 truncate max-w-[130px] pointer-events-none" data-preserve-content="true">
                                   {pt.text}
                                 </span>
                               )}
@@ -3201,7 +3300,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
 
                       {/* English Statement */}
                       <div className="flex-1 min-w-0 pr-2">
-                        <div className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">
+                        <div className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug" data-preserve-content="true">
                           {q.q.replace(/<[^>]*>/g, '').replace(/^\d+[\.\)]\s*/, '') || 'This is a...'}
                         </div>
                         <span className="text-[10px] text-slate-400 italic">
@@ -3612,7 +3711,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             {w.img && (
                               <img src={w.img} alt="" className="w-6 h-6 object-contain rounded bg-slate-50 border p-0.5" />
                             )}
-                            <span className="font-mono text-slate-800">{w.word}</span>
+                            <span className="font-mono text-slate-800" data-preserve-content="true">{w.word}</span>
                             {(w.word === sb.example?.word || w.word === sb.answers?.['0']) && (
                               <span className="text-[9px] px-1 py-0.2 rounded bg-blue-100 text-blue-700 font-extrabold uppercase">
                                 Ví dụ
@@ -4081,25 +4180,148 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                       </ul>
                     </div>
 
-                    {/* Canvas Stage Preview with interactive hotspots */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    {/* Canvas Stage Preview with interactive drag & resize hotspots */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700 flex-wrap gap-1.5">
                         <span>
-                          Vị trí các chi tiết trên tranh{' '}
-                          {selectedColourSpot && selectedColourSpot.qIdx === idx ? (
-                            <strong className="text-orange-600 underline">
-                              (Đang chọn: {items[selectedColourSpot.itemIdx]?.label || 'Chi tiết'} - Click lên tranh để dời toạ độ)
+                          Vị trí & kích thước vùng tô màu trên tranh{' '}
+                          {selectedColourSpot && selectedColourSpot.qIdx === idx && items[selectedColourSpot.itemIdx] ? (
+                            <strong className="text-orange-600">
+                              (Đang chọn: {items[selectedColourSpot.itemIdx]?.label || 'Chi tiết'} — Kéo trực tiếp để dời hoặc kéo 8 nút viền để mở rộng / thu nhỏ)
                             </strong>
                           ) : (
-                            '(Click chi tiết để chọn, sau đó click lên tranh để dời vị trí):'
+                            '(Bấm & kéo trực tiếp từng vùng trên tranh để di chuyển hoặc mở rộng/thu nhỏ):'
                           )}
                         </span>
                         <span className="text-[11px] text-slate-500">Khung hình: {W} x {H}px</span>
                       </div>
 
-                      <div className="relative max-w-2xl mx-auto rounded-xl overflow-hidden border-2 border-slate-300 bg-white shadow-sm select-none">
+                      {/* Quick Selected Spot Resize & Shape Toolbar */}
+                      {selectedColourSpot &&
+                        selectedColourSpot.qIdx === idx &&
+                        items[selectedColourSpot.itemIdx] && (() => {
+                          const selIdx = selectedColourSpot.itemIdx;
+                          const selItem = items[selIdx];
+                          const curW = Math.max(20, selItem.w || 64);
+                          const curH = Math.max(20, selItem.h || 64);
+                          const curShape = selItem.shape || 'rect';
+                          const updateSelectedSpot = (patch: Partial<ColourItem>) => {
+                            const nextItems = items.map((it, i) => (i === selIdx ? { ...it, ...patch } : it));
+                            updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                          };
+
+                          return (
+                            <div className="p-2.5 rounded-xl bg-white border-2 border-orange-300 shadow-xs space-y-2 text-xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="px-2 py-0.5 rounded-md bg-orange-600 text-white font-black text-[10px]">
+                                    #{selIdx + 1} ĐANG CHỌN
+                                  </span>
+                                  <span className="font-extrabold text-slate-900 truncate max-w-[180px]">
+                                    {selItem.label}
+                                  </span>
+                                  <span className="font-mono text-[11px] font-bold text-orange-800 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                                    {curW} × {curH} px
+                                  </span>
+                                </div>
+
+                                {/* Quick shrink / expand & shape buttons */}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateSelectedSpot({
+                                        w: Math.max(20, Math.round(curW * 0.8)),
+                                        h: Math.max(20, Math.round(curH * 0.8)),
+                                      })
+                                    }
+                                    className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-rose-100 text-slate-800 hover:text-rose-800 border border-slate-300 font-black text-[11px] transition cursor-pointer"
+                                    title="Thu nhỏ vùng tô màu bớt 20%"
+                                  >
+                                    ➖ Thu nhỏ (-20%)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateSelectedSpot({
+                                        w: Math.min(W, Math.round(curW * 1.25)),
+                                        h: Math.min(H, Math.round(curH * 1.25)),
+                                      })
+                                    }
+                                    className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-black text-[11px] transition cursor-pointer"
+                                    title="Mở rộng vùng tô màu thêm 25%"
+                                  >
+                                    ➕ Mở rộng (+25%)
+                                  </button>
+
+                                  <div className="flex items-center rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-[11px] font-bold">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateSelectedSpot({ shape: 'rect' })}
+                                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
+                                        curShape !== 'circle'
+                                          ? 'bg-white text-orange-700 shadow-2xs font-black'
+                                          : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Vùng tô hình chữ nhật (hợp với bãi cỏ, hàng rào, mặt bàn, mái nhà...)"
+                                    >
+                                      ▭ Chữ nhật
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateSelectedSpot({ shape: 'circle' })}
+                                      className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
+                                        curShape === 'circle'
+                                          ? 'bg-white text-orange-700 shadow-2xs font-black'
+                                          : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Vùng tô hình tròn / bầu dục (hợp với quả bóng, con chim, mặt trời, đám mây, cái cây...)"
+                                    >
+                                      ◯ Tròn / Bầu dục
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Live W & H range sliders */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700">
+                                  <span className="shrink-0 w-16">Rộng (W):</span>
+                                  <input
+                                    type="range"
+                                    min={20}
+                                    max={W}
+                                    step={2}
+                                    value={Math.min(W, curW)}
+                                    onChange={(e) => updateSelectedSpot({ w: parseInt(e.target.value, 10) || 20 })}
+                                    className="flex-1 accent-orange-600 cursor-pointer"
+                                  />
+                                  <span className="w-12 text-right font-mono text-slate-900">{curW}px</span>
+                                </label>
+                                <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700">
+                                  <span className="shrink-0 w-16">Cao (H):</span>
+                                  <input
+                                    type="range"
+                                    min={20}
+                                    max={H}
+                                    step={2}
+                                    value={Math.min(H, curH)}
+                                    onChange={(e) => updateSelectedSpot({ h: parseInt(e.target.value, 10) || 20 })}
+                                    className="flex-1 accent-orange-600 cursor-pointer"
+                                  />
+                                  <span className="w-12 text-right font-mono text-slate-900">{curH}px</span>
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                      <div className="relative max-w-2xl mx-auto rounded-xl overflow-visible border-2 border-slate-300 bg-white shadow-sm select-none">
                         <div
-                          className="relative w-full cursor-crosshair"
+                          ref={(el) => {
+                            colourStageRefs.current[idx] = el;
+                          }}
+                          className="relative w-full cursor-crosshair rounded-lg overflow-hidden touch-none"
                           style={{
                             paddingTop: `${(H / W) * 100}%`,
                             backgroundImage: q.img ? `url("${q.img}")` : 'none',
@@ -4108,6 +4330,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                             backgroundColor: '#ffffff'
                           }}
                           onClick={(e) => {
+                            if (activeColourDrag?.moved) return;
                             if (selectedColourSpot && selectedColourSpot.qIdx === idx && items[selectedColourSpot.itemIdx]) {
                               const rect = e.currentTarget.getBoundingClientRect();
                               const clickX = Math.round(((e.clientX - rect.left) / rect.width) * W);
@@ -4120,25 +4343,68 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                 y: clickY
                               };
                               updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
-                              showToast(`📍 Đã dời "${targetItem.label}" đến tọa độ (X: ${clickX}, Y: ${clickY})!`, 'info');
                             }
                           }}
                         >
                           {items.map((item, itIdx) => {
                             const crayon = getCrayonInfo(item.targetColor);
+                            const itemW = Math.max(20, item.w || 64);
+                            const itemH = Math.max(20, item.h || 64);
                             const leftPct = (item.x / W) * 100;
                             const topPct = (item.y / H) * 100;
-                            const wPct = ((item.w || 64) / W) * 100;
-                            const hPct = ((item.h || 64) / H) * 100;
+                            const wPct = (itemW / W) * 100;
+                            const hPct = (itemH / H) * 100;
                             const isSelected = selectedColourSpot?.qIdx === idx && selectedColourSpot?.itemIdx === itIdx;
+                            const isCompactSpot = itemW < 85 || itemH < 60;
+                            const isCircle = item.shape === 'circle';
+
+                            const startDrag = (
+                              e: React.PointerEvent,
+                              mode: 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+                            ) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setSelectedColourSpot({ qIdx: idx, itemIdx: itIdx });
+                              const stageEl = colourStageRefs.current[idx];
+                              if (!stageEl) return;
+                              const rect = stageEl.getBoundingClientRect();
+                              setActiveColourDrag({
+                                qIdx: idx,
+                                itemIdx: itIdx,
+                                mode,
+                                startClientX: e.clientX,
+                                startClientY: e.clientY,
+                                initItem: { ...item, w: itemW, h: itemH },
+                                stageWidthPx: rect.width,
+                                stageHeightPx: rect.height,
+                                canvasW: W,
+                                canvasH: H,
+                                moved: false,
+                              });
+                            };
+
+                            const handles: Array<{
+                              id: 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+                              style: React.CSSProperties;
+                              cursor: string;
+                            }> = [
+                              { id: 'nw', style: { left: -5, top: -5 }, cursor: 'nwse-resize' },
+                              { id: 'n', style: { left: '50%', top: -5, transform: 'translateX(-50%)' }, cursor: 'ns-resize' },
+                              { id: 'ne', style: { right: -5, top: -5 }, cursor: 'nesw-resize' },
+                              { id: 'e', style: { right: -5, top: '50%', transform: 'translateY(-50%)' }, cursor: 'ew-resize' },
+                              { id: 'se', style: { right: -5, bottom: -5 }, cursor: 'nwse-resize' },
+                              { id: 's', style: { left: '50%', bottom: -5, transform: 'translateX(-50%)' }, cursor: 'ns-resize' },
+                              { id: 'sw', style: { left: -5, bottom: -5 }, cursor: 'nesw-resize' },
+                              { id: 'w', style: { left: -5, top: '50%', transform: 'translateY(-50%)' }, cursor: 'ew-resize' },
+                            ];
 
                             return (
                               <div
                                 key={item.id || itIdx}
+                                onPointerDown={(e) => startDrag(e, 'move')}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedColourSpot({ qIdx: idx, itemIdx: itIdx });
-                                  showToast(`Đã chọn "${item.label}". Click vị trí mới trên tranh để dời toạ độ!`, 'info');
                                 }}
                                 style={{
                                   left: `${leftPct}%`,
@@ -4147,39 +4413,61 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   height: `${hPct}%`,
                                   transform: 'translate(-50%, -50%)',
                                   borderColor: isSelected ? '#ea580c' : crayon.borderHex,
-                                  backgroundColor: item.isExample ? crayon.hex + 'cc' : crayon.hex + '88'
+                                  backgroundColor: item.isExample ? crayon.hex + 'aa' : crayon.hex + '66'
                                 }}
-                                className={`absolute rounded-xl border-2 flex flex-col items-center justify-center p-1 shadow-sm transition cursor-pointer ${
+                                className={`absolute border-2 flex flex-col items-center justify-center p-0.5 shadow-sm transition-shadow cursor-move touch-none ${
+                                  isCircle ? 'rounded-full' : 'rounded-xl'
+                                } ${
                                   isSelected
-                                    ? 'ring-4 ring-orange-500 scale-110 shadow-lg z-20'
+                                    ? 'ring-4 ring-orange-500/80 shadow-lg z-20'
                                     : item.isExample
-                                    ? 'ring-2 ring-emerald-500 hover:scale-105'
-                                    : 'hover:scale-105'
+                                    ? 'ring-2 ring-emerald-500 hover:z-10'
+                                    : 'hover:ring-2 hover:ring-orange-400 hover:z-10'
                                 }`}
-                                title={`${item.label} (Click để chọn, sau đó click lên tranh để dời)`}
+                                title={`${item.label} (${itemW}×${itemH}px) — Kéo để di chuyển, chọn rồi kéo 8 nút góc/cạnh để mở rộng hoặc thu nhỏ`}
                               >
-                                {item.isExample && (
-                                  <span className="text-[8px] font-black px-1 rounded bg-emerald-600 text-white uppercase tracking-wider mb-0.5">
-                                    ★ VÍ DỤ
+                                {isCompactSpot ? (
+                                  <span
+                                    className="text-[9px] font-black px-1 rounded-full leading-tight pointer-events-none shadow-2xs"
+                                    style={{ backgroundColor: crayon.borderHex, color: '#ffffff' }}
+                                  >
+                                    {item.isExample ? '★' : `#${itIdx + 1}`}
                                   </span>
+                                ) : (
+                                  <>
+                                    {item.isExample && (
+                                      <span className="text-[8px] font-black px-1 rounded bg-emerald-600 text-white uppercase tracking-wider mb-0.5 pointer-events-none">
+                                        ★ VÍ DỤ
+                                      </span>
+                                    )}
+                                    <span
+                                      className="text-[10px] font-extrabold text-center truncate max-w-full px-1 rounded pointer-events-none"
+                                      style={{ color: crayon.textColor, backgroundColor: 'rgba(0,0,0,0.28)' }}
+                                      data-preserve-content="true"
+                                    >
+                                      {item.label}
+                                    </span>
+                                    <span
+                                      className="text-[9px] font-black text-white px-1.5 rounded-full mt-0.5 pointer-events-none"
+                                      style={{ backgroundColor: crayon.borderHex }}
+                                    >
+                                      {crayon.name} • {item.isExample ? '0đ' : `${formatPointsClean(lcBreakdown.itemPointsMap[item.id] ?? 0)}đ`}
+                                    </span>
+                                  </>
                                 )}
-                                {isSelected && (
-                                  <span className="text-[8px] font-black px-1 rounded bg-orange-600 text-white uppercase tracking-wider mb-0.5 animate-pulse">
-                                    ĐANG CHỌN
-                                  </span>
-                                )}
-                                <span
-                                  className="text-[10px] font-extrabold text-center truncate max-w-full px-1 rounded"
-                                  style={{ color: crayon.textColor, backgroundColor: 'rgba(0,0,0,0.25)' }}
-                                >
-                                  {item.label}
-                                </span>
-                                <span
-                                  className="text-[9px] font-black text-white px-1.5 rounded-full mt-0.5"
-                                  style={{ backgroundColor: crayon.borderHex }}
-                                >
-                                  {crayon.name} • {item.isExample ? '0đ' : `${formatPointsClean(lcBreakdown.itemPointsMap[item.id] ?? 0)}đ`}
-                                </span>
+
+                                {/* 8 Resize Handles when selected */}
+                                {isSelected &&
+                                  handles.map((hnd) => (
+                                    <div
+                                      key={hnd.id}
+                                      onPointerDown={(e) => startDrag(e, hnd.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ ...hnd.style, cursor: hnd.cursor }}
+                                      title="Kéo để mở rộng hoặc thu nhỏ vùng tô màu"
+                                      className="absolute w-3 h-3 rounded-full bg-white border-2 border-orange-600 shadow-md z-30 hover:scale-125 transition-transform touch-none"
+                                    />
+                                  ))}
                               </div>
                             );
                           })}
@@ -4428,16 +4716,16 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   </div>
                                 </div>
 
-                                {/* Coordinates & Size */}
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                                {/* Coordinates, Size & Shape */}
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 text-xs">
                                   <div className="flex items-center gap-1">
-                                    <span className="font-bold text-slate-500">Tọa độ X:</span>
+                                    <span className="font-bold text-slate-500">X:</span>
                                     <input
                                       type="number"
                                       value={item.x}
                                       onChange={(e) => {
                                         const nextItems = [...items];
-                                        nextItems[itIdx] = { ...nextItems[itIdx], x: parseInt(e.target.value) || 0 };
+                                        nextItems[itIdx] = { ...nextItems[itIdx], x: parseInt(e.target.value, 10) || 0 };
                                         updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                       }}
                                       className="w-16 px-1.5 py-0.5 bg-white border rounded text-center font-mono font-bold"
@@ -4446,13 +4734,13 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   </div>
 
                                   <div className="flex items-center gap-1">
-                                    <span className="font-bold text-slate-500">Tọa độ Y:</span>
+                                    <span className="font-bold text-slate-500">Y:</span>
                                     <input
                                       type="number"
                                       value={item.y}
                                       onChange={(e) => {
                                         const nextItems = [...items];
-                                        nextItems[itIdx] = { ...nextItems[itIdx], y: parseInt(e.target.value) || 0 };
+                                        nextItems[itIdx] = { ...nextItems[itIdx], y: parseInt(e.target.value, 10) || 0 };
                                         updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                       }}
                                       className="w-16 px-1.5 py-0.5 bg-white border rounded text-center font-mono font-bold"
@@ -4461,13 +4749,18 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   </div>
 
                                   <div className="flex items-center gap-1">
-                                    <span className="font-bold text-slate-500">Rộng (W):</span>
+                                    <span className="font-bold text-slate-500">Rộng:</span>
                                     <input
                                       type="number"
+                                      min={20}
+                                      max={W}
                                       value={item.w || 64}
                                       onChange={(e) => {
                                         const nextItems = [...items];
-                                        nextItems[itIdx] = { ...nextItems[itIdx], w: parseInt(e.target.value) || 64 };
+                                        nextItems[itIdx] = {
+                                          ...nextItems[itIdx],
+                                          w: Math.max(20, Math.min(W, parseInt(e.target.value, 10) || 20))
+                                        };
                                         updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                       }}
                                       className="w-16 px-1.5 py-0.5 bg-white border rounded text-center font-mono font-bold"
@@ -4476,24 +4769,95 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                   </div>
 
                                   <div className="flex items-center gap-1">
-                                    <span className="font-bold text-slate-500">Cao (H):</span>
+                                    <span className="font-bold text-slate-500">Cao:</span>
                                     <input
                                       type="number"
+                                      min={20}
+                                      max={H}
                                       value={item.h || 64}
                                       onChange={(e) => {
                                         const nextItems = [...items];
-                                        nextItems[itIdx] = { ...nextItems[itIdx], h: parseInt(e.target.value) || 64 };
+                                        nextItems[itIdx] = {
+                                          ...nextItems[itIdx],
+                                          h: Math.max(20, Math.min(H, parseInt(e.target.value, 10) || 20))
+                                        };
                                         updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                       }}
                                       className="w-16 px-1.5 py-0.5 bg-white border rounded text-center font-mono font-bold"
                                     />
                                     <span className="text-[10px] text-slate-400">px</span>
                                   </div>
+
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-bold text-slate-500">Hình:</span>
+                                    <select
+                                      value={item.shape === 'circle' ? 'circle' : 'rect'}
+                                      onChange={(e) => {
+                                        const nextItems = [...items];
+                                        nextItems[itIdx] = {
+                                          ...nextItems[itIdx],
+                                          shape: e.target.value as 'rect' | 'circle'
+                                        };
+                                        updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                                      }}
+                                      className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold text-slate-800"
+                                    >
+                                      <option value="rect">Chữ nhật</option>
+                                      <option value="circle">Tròn / Bầu dục</option>
+                                    </select>
+                                  </div>
                                 </div>
 
-                                {/* Quick size presets especially for broad areas like grass, mountains, sky */}
+                                {/* Quick shrink/expand & size presets (from tiny detail to broad scene region) */}
                                 <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
-                                  <span className="text-slate-500 font-semibold">Cỡ vùng tô nhanh:</span>
+                                  <span className="text-slate-500 font-semibold">Mở rộng / Thu nhỏ:</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curW = Math.max(20, item.w || 64);
+                                      const curH = Math.max(20, item.h || 64);
+                                      const nextItems = [...items];
+                                      nextItems[itIdx] = {
+                                        ...nextItems[itIdx],
+                                        w: Math.max(20, curW - 20),
+                                        h: Math.max(20, curH - 20)
+                                      };
+                                      updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                                    }}
+                                    className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded text-[10px] font-black cursor-pointer"
+                                    title="Thu nhỏ bớt 20px mỗi chiều"
+                                  >
+                                    ➖ Thu nhỏ
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curW = Math.max(20, item.w || 64);
+                                      const curH = Math.max(20, item.h || 64);
+                                      const nextItems = [...items];
+                                      nextItems[itIdx] = {
+                                        ...nextItems[itIdx],
+                                        w: Math.min(W, curW + 25),
+                                        h: Math.min(H, curH + 25)
+                                      };
+                                      updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                                    }}
+                                    className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded text-[10px] font-black cursor-pointer"
+                                    title="Mở rộng thêm 25px mỗi chiều"
+                                  >
+                                    ➕ Mở rộng
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextItems = [...items];
+                                      nextItems[itIdx] = { ...nextItems[itIdx], w: 32, h: 32 };
+                                      updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
+                                    }}
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                                  >
+                                    🔹 Siêu nhỏ (32x32)
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -4501,7 +4865,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       nextItems[itIdx] = { ...nextItems[itIdx], w: 60, h: 60 };
                                       updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                     }}
-                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold"
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
                                   >
                                     🎯 Nhỏ (60x60)
                                   </button>
@@ -4512,7 +4876,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       nextItems[itIdx] = { ...nextItems[itIdx], w: 120, h: 100 };
                                       updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                     }}
-                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold"
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
                                   >
                                     🎈 Đồ vật vừa (120x100)
                                   </button>
@@ -4523,7 +4887,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       nextItems[itIdx] = { ...nextItems[itIdx], w: 240, h: 160 };
                                       updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                     }}
-                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold"
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
                                   >
                                     🌳 Tán cây / Hồ nước (240x160)
                                   </button>
@@ -4534,7 +4898,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                                       nextItems[itIdx] = { ...nextItems[itIdx], w: 550, h: 150 };
                                       updateQuestion(idx, { listenColour: { ...lc, items: nextItems } });
                                     }}
-                                    className="px-2.5 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 rounded text-[10px] font-extrabold"
+                                    className="px-2.5 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 rounded text-[10px] font-extrabold cursor-pointer"
                                     title="Dành cho bãi cỏ, dãy núi, bầu trời: Bé tô hoặc đổ màu vào bất cứ điểm nào trên vùng rộng này đều tính đúng!"
                                   >
                                     🌿 Mảng rộng: Bãi cỏ / Núi / Bầu trời (550x150)
@@ -4862,7 +5226,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                           <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-black">
                             {pi + 1}
                           </span>
-                          <span className="truncate max-w-[110px]">Part {pi + 1}: {getCleanPartTitle(p.title)}</span>
+                          <span className="truncate max-w-[110px]" data-preserve-content="true">Part {pi + 1}: {getCleanPartTitle(p.title)}</span>
                           <span className="px-1 py-0.2 rounded bg-blue-200/80 text-blue-950 text-[10px] font-black">
                             {p.points}đ ({count}c)
                           </span>
@@ -4890,7 +5254,7 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                           <span className="w-4 h-4 rounded-full bg-teal-600 text-white text-[10px] flex items-center justify-center font-black">
                             {pi + 1}
                           </span>
-                          <span className="truncate max-w-[110px]">Part {pi + 1}: {getCleanPartTitle(p.title)}</span>
+                          <span className="truncate max-w-[110px]" data-preserve-content="true">Part {pi + 1}: {getCleanPartTitle(p.title)}</span>
                           <span className="px-1 py-0.2 rounded bg-teal-200/80 text-teal-950 text-[10px] font-black">
                             {p.points}đ ({count}c)
                           </span>

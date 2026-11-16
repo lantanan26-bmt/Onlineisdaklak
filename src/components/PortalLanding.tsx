@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Teacher } from '../types';
+import { AppBranding, Student, Teacher } from '../types';
+import { hashPassword } from '../services/firebaseService';
+import { LanguageToggleButton } from './LanguageToggleButton';
 
 interface PortalLandingProps {
   adminPin: string;
   teachers: Teacher[];
+  students?: Student[];
+  branding?: AppBranding;
   cloudHealth?: 'checking' | 'connected' | 'offline';
   onLoginAdmin: () => void;
   onLoginTeacher: (teacher: Teacher) => void;
@@ -11,70 +15,175 @@ interface PortalLandingProps {
     username: string,
     password: string
   ) => Promise<{ status: 'ok'; teacher: Teacher } | { status: 'inactive' } | { status: 'wrong_password' } | { status: 'not_found' }>;
-  onGoToStudentExam: () => void;
+  onLookupTeacherPublicCloud?: (
+    username: string
+  ) => Promise<{ id: string; name: string; username: string; isActive: boolean } | null>;
+  onLookupStudentCloud?: (studentId: string) => Promise<Student | null>;
+  onGoToStudentExam: (prefillStudent?: Student | null) => void;
   showToast: (msg: string, type?: 'success' | 'warn' | 'error' | 'info') => void;
 }
+
+type RecognizedTeacherHint = {
+  id: string;
+  name: string;
+  username: string;
+  isActive: boolean;
+};
 
 export const PortalLanding: React.FC<PortalLandingProps> = ({
   adminPin,
   teachers,
+  students = [],
+  branding,
   cloudHealth = 'checking',
   onLoginAdmin,
   onLoginTeacher,
   onVerifyTeacherCloud,
+  onLookupTeacherPublicCloud,
+  onLookupStudentCloud,
   onGoToStudentExam,
-  showToast
 }) => {
+  const displayAppName = branding?.appName?.trim() || 'iSMART LMS';
+  const displayLogoText = branding?.logoText?.trim() || 'iS';
+  const displayLogoUrl = branding?.logoUrl || null;
+  const displayLogoWidth = Math.min(280, Math.max(24, Math.round(branding?.logoWidth ?? 40)));
+  const displayLogoHeight = Math.min(120, Math.max(24, Math.round(branding?.logoHeight ?? 40)));
+  const displayLogoFitClass =
+    branding?.logoFit === 'fill' ? 'object-fill' : branding?.logoFit === 'cover' ? 'object-cover' : 'object-contain';
+  const displayLogoFontPx = Math.max(13, Math.min(34, Math.round(Math.min(displayLogoHeight * 0.48, displayLogoWidth * 0.44))));
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isVerifyingCloud, setIsVerifyingCloud] = useState(false);
+  const [isCheckingIdentifier, setIsCheckingIdentifier] = useState(false);
 
-  // Recognition state: 'none' | 'admin' | 'teacher'
-  const [recognizedRole, setRecognizedRole] = useState<'none' | 'admin' | 'teacher'>('none');
-  const [matchedTeacher, setMatchedTeacher] = useState<Teacher | null>(null);
+  // Recognition state: 'none' | 'admin' | 'teacher' | 'student'
+  const [recognizedRole, setRecognizedRole] = useState<'none' | 'admin' | 'teacher' | 'student'>('none');
+  const [matchedTeacher, setMatchedTeacher] = useState<RecognizedTeacherHint | null>(null);
+  const [matchedStudent, setMatchedStudent] = useState<Student | null>(null);
 
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
-  // Real-time automatic recognition as user types username
+  // Real-time local recognition + debounced Cloud teacher/student recognition
   useEffect(() => {
-    const cleanUser = username.trim().toLowerCase();
+    const rawTrimmed = username.trim();
+    const cleanUser = rawTrimmed.toLowerCase();
+    const cleanUpper = rawTrimmed.toUpperCase();
     setErrorMessage(null);
 
     if (!cleanUser) {
       setRecognizedRole('none');
       setMatchedTeacher(null);
+      setMatchedStudent(null);
+      setIsCheckingIdentifier(false);
       return;
     }
 
     if (cleanUser === 'admin') {
       setRecognizedRole('admin');
       setMatchedTeacher(null);
+      setMatchedStudent(null);
+      setIsCheckingIdentifier(false);
       return;
     }
 
-    const found = teachers.find((t) => t.username.toLowerCase() === cleanUser);
-    if (found) {
+    const foundTeacher = teachers.find((t) => t.username.toLowerCase() === cleanUser);
+    if (foundTeacher) {
       setRecognizedRole('teacher');
-      setMatchedTeacher(found);
+      setMatchedTeacher({
+        id: foundTeacher.id,
+        name: foundTeacher.name,
+        username: foundTeacher.username,
+        isActive: foundTeacher.isActive !== false,
+      });
+      setMatchedStudent(null);
+      setIsCheckingIdentifier(false);
+      return;
+    }
+
+    if (cleanUser === 'hocsinh' || cleanUser === 'học sinh' || cleanUser === 'student' || cleanUser === 'hs') {
+      setRecognizedRole('student');
+      setMatchedTeacher(null);
+      setMatchedStudent(null);
+      setIsCheckingIdentifier(false);
+      return;
+    }
+
+    const foundStudent = students.find((s) => s.id.toUpperCase() === cleanUpper);
+    if (foundStudent) {
+      setRecognizedRole('student');
+      setMatchedTeacher(null);
+      setMatchedStudent(foundStudent);
+      setIsCheckingIdentifier(false);
       return;
     }
 
     setRecognizedRole('none');
     setMatchedTeacher(null);
-  }, [username, teachers]);
+    setMatchedStudent(null);
 
-  // Handle submit logic
+    // Debounced Cloud check for newly created Teachers or Students not yet cached locally
+    if (
+      cleanUser.length >= 2 &&
+      typeof navigator !== 'undefined' &&
+      navigator.onLine &&
+      (onLookupTeacherPublicCloud || onLookupStudentCloud)
+    ) {
+      let cancelled = false;
+      const timer = window.setTimeout(async () => {
+        setIsCheckingIdentifier(true);
+        try {
+          if (onLookupTeacherPublicCloud) {
+            const cloudTeacher = await onLookupTeacherPublicCloud(cleanUser);
+            if (!cancelled && cloudTeacher) {
+              setRecognizedRole('teacher');
+              setMatchedTeacher(cloudTeacher);
+              setMatchedStudent(null);
+              return;
+            }
+          }
+          if (onLookupStudentCloud && cleanUpper.length >= 3) {
+            const cloudStu = await onLookupStudentCloud(cleanUpper);
+            if (!cancelled && cloudStu) {
+              setRecognizedRole('student');
+              setMatchedTeacher(null);
+              setMatchedStudent(cloudStu);
+            }
+          }
+        } catch {
+          // ignore silent check failures
+        } finally {
+          if (!cancelled) setIsCheckingIdentifier(false);
+        }
+      }, 320);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
+  }, [username, teachers, students, onLookupTeacherPublicCloud, onLookupStudentCloud]);
+
+  // Handle smart submit (Continue / Login)
   const handleLoginSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
 
-    const cleanUser = username.trim().toLowerCase();
+    const rawTrimmed = username.trim();
+    const cleanUser = rawTrimmed.toLowerCase();
+    const cleanUpper = rawTrimmed.toUpperCase();
     const cleanPass = password.trim();
 
     if (!cleanUser) {
-      setErrorMessage('Vui lòng nhập Tên đăng nhập!');
+      setErrorMessage('Vui lòng nhập Tên đăng nhập hoặc chọn Học sinh vào phòng thi!');
+      return;
+    }
+
+    // 0. If student already recognized, open Exam Room Login directly
+    if (recognizedRole === 'student') {
+      onGoToStudentExam(matchedStudent);
       return;
     }
 
@@ -95,304 +204,375 @@ export const PortalLanding: React.FC<PortalLandingProps> = ({
       return;
     }
 
-    // 2. TEACHER FLOW (Check Cloud Firestore first so permissions/passwords stay up-to-date across machines!)
-    if (onVerifyTeacherCloud) {
-      if (!cleanPass) {
-        setErrorMessage('Vui lòng nhập Mật khẩu giáo viên!');
-        passwordInputRef.current?.focus();
-        return;
-      }
-      setIsVerifyingCloud(true);
-      try {
-        const cloudRes = await onVerifyTeacherCloud(cleanUser, cleanPass);
-        if (cloudRes.status === 'ok') {
-          onLoginTeacher(cloudRes.teacher);
-          return;
-        }
-        if (cloudRes.status === 'inactive') {
-          setErrorMessage('Tài khoản giáo viên này đang bị tạm khóa. Vui lòng liên hệ Admin!');
-          return;
-        }
-        if (cloudRes.status === 'wrong_password') {
-          setErrorMessage('Mật khẩu giáo viên không chính xác! Vui lòng kiểm tra lại.');
-          passwordInputRef.current?.focus();
-          return;
-        }
-      } catch {
-        // Offline or not yet synced to Cloud: fall back smoothly to local IndexedDB teacher list
-      } finally {
-        setIsVerifyingCloud(false);
-      }
-    }
-
-    const teacher = teachers.find((t) => t.username.toLowerCase() === cleanUser);
-    if (teacher) {
-      if (!cleanPass) {
-        setErrorMessage(`Vui lòng nhập Mật khẩu cho tài khoản Thầy/Cô ${teacher.name}!`);
-        passwordInputRef.current?.focus();
-        return;
-      }
-
-      if (teacher.isActive === false) {
+    // 2. TEACHER FLOW (already recognized -> verify password)
+    if (recognizedRole === 'teacher') {
+      if (matchedTeacher?.isActive === false) {
         setErrorMessage('Tài khoản giáo viên này đang bị tạm khóa. Vui lòng liên hệ Admin!');
         return;
       }
 
-      if (teacher.password === cleanPass) {
-        onLoginTeacher(teacher);
-      } else {
-        setErrorMessage('Mật khẩu giáo viên không chính xác! Vui lòng kiểm tra lại.');
+      if (!cleanPass) {
+        setErrorMessage(`Vui lòng nhập Mật khẩu cho Thầy/Cô ${matchedTeacher?.name || cleanUser}!`);
         passwordInputRef.current?.focus();
+        return;
       }
-      return;
+
+      if (onVerifyTeacherCloud) {
+        setIsVerifyingCloud(true);
+        try {
+          const cloudRes = await onVerifyTeacherCloud(cleanUser, cleanPass);
+          if (cloudRes.status === 'ok') {
+            onLoginTeacher(cloudRes.teacher);
+            return;
+          }
+          if (cloudRes.status === 'inactive') {
+            setErrorMessage('Tài khoản giáo viên này đang bị tạm khóa. Vui lòng liên hệ Admin!');
+            return;
+          }
+          if (cloudRes.status === 'wrong_password') {
+            setErrorMessage('Mật khẩu giáo viên không chính xác! Vui lòng kiểm tra lại.');
+            passwordInputRef.current?.focus();
+            return;
+          }
+        } catch {
+          // Offline or fallback to local list
+        } finally {
+          setIsVerifyingCloud(false);
+        }
+      }
+
+      const teacher = teachers.find((t) => t.username.toLowerCase() === cleanUser);
+      if (teacher) {
+        if (teacher.isActive === false) {
+          setErrorMessage('Tài khoản giáo viên này đang bị tạm khóa. Vui lòng liên hệ Admin!');
+          return;
+        }
+        const passwordMatched =
+          (teacher.password && teacher.password === cleanPass) ||
+          (teacher.passHash && (await hashPassword(cleanPass)) === teacher.passHash);
+
+        if (passwordMatched) {
+          onLoginTeacher(teacher);
+        } else {
+          setErrorMessage('Mật khẩu giáo viên không chính xác! Vui lòng kiểm tra lại.');
+          passwordInputRef.current?.focus();
+        }
+        return;
+      }
     }
 
-    // 3. UNKNOWN USER
-    setErrorMessage(`Không tìm thấy tài khoản "${username}". Vui lòng kiểm tra lại tên đăng nhập!`);
+    // 3. NOT RECOGNIZED YET -> Verify Cloud immediately on Continue / Enter
+    setIsCheckingIdentifier(true);
+    try {
+      if (onLookupTeacherPublicCloud) {
+        const cloudTeacher = await onLookupTeacherPublicCloud(cleanUser);
+        if (cloudTeacher) {
+          setRecognizedRole('teacher');
+          setMatchedTeacher(cloudTeacher);
+          setMatchedStudent(null);
+          if (cloudTeacher.isActive === false) {
+            setErrorMessage('Tài khoản giáo viên này đang bị tạm khóa. Vui lòng liên hệ Admin!');
+          } else {
+            window.setTimeout(() => passwordInputRef.current?.focus(), 40);
+          }
+          return;
+        }
+      }
+
+      if (onLookupStudentCloud) {
+        const cloudStu = await onLookupStudentCloud(cleanUpper);
+        if (cloudStu) {
+          onGoToStudentExam(cloudStu);
+          return;
+        }
+      }
+    } catch {
+      // ignore offline error
+    } finally {
+      setIsCheckingIdentifier(false);
+    }
+
+    setErrorMessage(`Không tìm thấy tài khoản "${username}". Nếu là học sinh, hãy bấm nút "Học sinh vào phòng thi"!`);
   };
 
   const handleKeyDownUsername = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (recognizedRole !== 'none') {
-        passwordInputRef.current?.focus();
+      if (recognizedRole === 'admin' || recognizedRole === 'teacher') {
+        if (password.trim()) {
+          handleLoginSubmit();
+        } else {
+          passwordInputRef.current?.focus();
+        }
       } else {
         handleLoginSubmit();
       }
     }
   };
 
+  const needsPassword = recognizedRole === 'admin' || recognizedRole === 'teacher';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6">
       {/* Brand Header */}
-      <header className="max-w-xl w-full mx-auto flex items-center justify-between pb-4 gap-2">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/25">
-            iS
-          </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-2">
-              iSMART LMS
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                Portal
-              </span>
+      <header className="max-w-lg w-full mx-auto flex items-center justify-between pb-3 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {displayLogoUrl ? (
+            <img
+              src={displayLogoUrl}
+              alt={displayAppName}
+              style={{ width: `${displayLogoWidth}px`, height: `${displayLogoHeight}px` }}
+              className={`rounded-2xl ${displayLogoFitClass} bg-white border border-slate-700 p-0.5 shadow-lg shadow-blue-500/20 shrink-0`}
+            />
+          ) : (
+            <div
+              style={{ width: `${displayLogoWidth}px`, height: `${displayLogoHeight}px`, fontSize: `${displayLogoFontPx}px` }}
+              className="rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/25 shrink-0 px-1.5 text-center leading-none overflow-hidden"
+            >
+              {displayLogoText}
+            </div>
+          )}
+          <div className="min-w-0">
+            <h1 className="text-base font-black text-white tracking-tight flex items-center gap-2 truncate">
+              <span data-preserve-content="true">{displayAppName}</span>
             </h1>
-            <p className="text-[11px] text-slate-400">Hệ thống khảo thí & thi trực tuyến</p>
+            <p className="text-[11px] text-slate-400 truncate">Hệ thống khảo thí & thi trực tuyến</p>
           </div>
         </div>
-        <div
-          className={`px-2.5 py-1 rounded-full border text-[11px] font-bold flex items-center gap-1.5 shrink-0 ${
-            cloudHealth === 'connected'
-              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-              : cloudHealth === 'checking'
-              ? 'bg-slate-800 text-slate-300 border-slate-700'
-              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-          }`}
-        >
-          <span
-            className={`w-2 h-2 rounded-full ${
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div
+            className={`px-2 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1.5 shrink-0 ${
               cloudHealth === 'connected'
-                ? 'bg-emerald-400'
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                 : cloudHealth === 'checking'
-                ? 'bg-slate-400 animate-pulse'
-                : 'bg-amber-400'
+                ? 'bg-slate-800 text-slate-300 border-slate-700'
+                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
             }`}
-          ></span>
-          <span>
-            {cloudHealth === 'connected'
-              ? 'Firebase Cloud: Tự động kết nối'
-              : cloudHealth === 'checking'
-              ? 'Đang nối Cloud...'
-              : 'Chế độ Offline'}
-          </span>
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                cloudHealth === 'connected'
+                  ? 'bg-emerald-400'
+                  : cloudHealth === 'checking'
+                  ? 'bg-slate-400 animate-pulse'
+                  : 'bg-amber-400'
+              }`}
+            ></span>
+            <span className="hidden sm:inline">
+              {cloudHealth === 'connected'
+                ? 'Cloud'
+                : cloudHealth === 'checking'
+                ? 'Đang nối...'
+                : 'Offline'}
+            </span>
+          </div>
+          <LanguageToggleButton variant="dark" />
         </div>
       </header>
 
-      {/* Main Unified Login Card */}
-      <main className="flex-1 flex items-center justify-center py-4">
-        <div className="w-full max-w-md bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-md space-y-6 animate-in fade-in zoom-in-95 duration-300">
-          
-          {/* SECTION 1: HỌC SINH DỰ THI (1-Click, No Password Needed) */}
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={onGoToStudentExam}
-              className="w-full group p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all duration-200 flex items-center justify-between cursor-pointer active:scale-98 border border-emerald-400/30"
-            >
-              <div className="flex items-center gap-3.5 text-left">
-                <div className="w-12 h-12 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shrink-0">
-                  <i className="fa-solid fa-graduation-cap"></i>
-                </div>
-                <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-200 block">
-                    Dành cho học sinh
-                  </span>
-                  <span className="text-base sm:text-lg font-black block">
-                    VÀO PHÒNG THI NGAY
-                  </span>
-                  <span className="text-[11px] text-emerald-100/90 block">
-                    Không cần tài khoản • Chọn lớp để thi
-                  </span>
-                </div>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white group-hover:translate-x-1 transition-transform shrink-0">
-                <i className="fa-solid fa-arrow-right"></i>
-              </div>
-            </button>
+      {/* Main Compact Login Card */}
+      <main className="flex-1 flex items-center justify-center py-3">
+        <div className="w-full max-w-sm bg-slate-900/95 border border-slate-700/80 rounded-3xl p-5 sm:p-6 shadow-2xl backdrop-blur-md space-y-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="text-center">
+            <h2 className="text-base font-black text-white tracking-tight">Đăng Nhập Hệ Thống</h2>
           </div>
 
-          {/* DIVIDER */}
-          <div className="relative flex items-center justify-center">
-            <div className="border-t border-slate-700/80 w-full"></div>
-            <span className="bg-slate-900 px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0">
-              Hoặc Đăng Nhập Quản Lý / Giáo Viên
-            </span>
-            <div className="border-t border-slate-700/80 w-full"></div>
-          </div>
-
-          {/* SECTION 2: SMART CONSOLIDATED LOGIN FOR ADMIN & TEACHERS */}
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
-            
-            {/* Field 1: Tên đăng nhập với Smart Auto-Detection */}
+          {/* Smart Auto-Detect Form */}
+          <form onSubmit={handleLoginSubmit} className="space-y-3.5">
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold uppercase text-slate-300">
-                  Tên Đăng Nhập:
-                </label>
-
-                {/* Role Detection Badge */}
-                {recognizedRole === 'admin' && (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-in fade-in">
-                    <i className="fa-solid fa-shield-halved text-[10px]"></i>
-                    Quản Trị Viên (Admin)
-                  </span>
-                )}
-                {recognizedRole === 'teacher' && matchedTeacher && (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1 animate-in fade-in">
-                    <i className="fa-solid fa-chalkboard-user text-[10px]"></i>
-                    Thầy/Cô {matchedTeacher.name}
-                  </span>
-                )}
-              </div>
-
+              <label className="text-[11px] font-bold uppercase text-slate-300 block mb-1.5">
+                Tên đăng nhập / Mã HS:
+              </label>
               <div className="relative">
                 <input
                   type="text"
                   autoFocus
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    setPassword('');
+                    setErrorMessage(null);
+                  }}
                   onKeyDown={handleKeyDownUsername}
-                  placeholder="Nhập tên đăng nhập (ví dụ: admin)..."
-                  className={`w-full px-4 py-3 bg-slate-950 border-2 rounded-xl text-white placeholder-slate-500 text-sm font-semibold transition focus:outline-none ${
+                  placeholder="Nhập admin, tên GV hoặc Mã HS..."
+                  className={`w-full px-3.5 py-2.5 pr-9 bg-slate-950 border-2 rounded-xl text-white placeholder-slate-500 text-sm font-semibold transition focus:outline-none ${
                     recognizedRole === 'admin'
                       ? 'border-amber-500 focus:border-amber-400'
                       : recognizedRole === 'teacher'
                       ? 'border-blue-500 focus:border-blue-400'
+                      : recognizedRole === 'student'
+                      ? 'border-emerald-500 focus:border-emerald-400'
                       : 'border-slate-700 focus:border-indigo-500'
                   }`}
                 />
+                {isCheckingIdentifier ? (
+                  <span className="absolute right-3 top-3 text-xs text-slate-400">
+                    <i className="fa-solid fa-circle-notch fa-spin"></i>
+                  </span>
+                ) : recognizedRole !== 'none' ? (
+                  <span className="absolute right-3 top-3 text-xs">
+                    <i
+                      className={`fa-solid fa-circle-check ${
+                        recognizedRole === 'admin'
+                          ? 'text-amber-400'
+                          : recognizedRole === 'teacher'
+                          ? 'text-blue-400'
+                          : 'text-emerald-400'
+                      }`}
+                    ></i>
+                  </span>
+                ) : null}
+              </div>
 
-                {recognizedRole !== 'none' && (
-                  <span className="absolute right-3.5 top-3.5 text-xs">
-                    {recognizedRole === 'admin' ? (
-                      <i className="fa-solid fa-circle-check text-amber-400"></i>
+              {/* Automatic Recognition Status Notice */}
+              {recognizedRole === 'admin' && (
+                <div className="mt-2 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                  <i className="fa-solid fa-shield-halved text-amber-400 shrink-0"></i>
+                  <span>Đã nhận diện: Quản Trị Viên (Admin) — Vui lòng nhập mật khẩu</span>
+                </div>
+              )}
+
+              {recognizedRole === 'teacher' && matchedTeacher && (
+                <div
+                  className={`mt-2 px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in ${
+                    matchedTeacher.isActive === false
+                      ? 'bg-red-950/60 border-red-500/40 text-red-300'
+                      : 'bg-blue-500/15 border-blue-500/40 text-blue-200'
+                  }`}
+                >
+                  <i className="fa-solid fa-chalkboard-user text-blue-400 shrink-0"></i>
+                  <span>
+                    {matchedTeacher.isActive === false ? (
+                      <>Tài khoản Giáo viên (<span data-preserve-content="true">{matchedTeacher.name}</span>) đang bị khóa!</>
                     ) : (
-                      <i className="fa-solid fa-circle-check text-blue-400"></i>
+                      <>Giáo viên: <strong data-preserve-content="true">{matchedTeacher.name}</strong> — Nhập mật khẩu để đăng nhập</>
                     )}
                   </span>
-                )}
-              </div>
+                </div>
+              )}
+
+              {recognizedRole === 'student' && (
+                <div className="mt-2 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <i className="fa-solid fa-user-graduate text-emerald-400 shrink-0"></i>
+                    <span className="truncate">
+                      {matchedStudent ? (
+                        <>Học sinh: <strong data-preserve-content="true">{matchedStudent.name}</strong></>
+                      ) : (
+                        'Nhận diện Học sinh — Vào phòng thi'
+                      )}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onGoToStudentExam(matchedStudent)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[11px] font-black shrink-0 cursor-pointer transition"
+                  >
+                    Vào thi →
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Field 2: Password (always available or highlighted once recognized) */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold uppercase text-slate-300">
+            {/* Password Box: Revealed ONLY when Admin or Teacher is recognized */}
+            {needsPassword && (
+              <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                <label className="text-[11px] font-bold uppercase text-slate-300 block">
                   {recognizedRole === 'admin'
                     ? 'Mật Khẩu Admin:'
-                    : recognizedRole === 'teacher'
-                    ? `Mật Khẩu (${matchedTeacher?.name}):`
-                    : 'Mật Khẩu:'}
+                    : 'Mật Khẩu Giáo Viên:'}
                 </label>
+                <div className="relative">
+                  <input
+                    ref={passwordInputRef}
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setErrorMessage(null);
+                    }}
+                    placeholder={
+                      recognizedRole === 'admin'
+                        ? 'Nhập mật khẩu Admin...'
+                        : 'Nhập mật khẩu giáo viên...'
+                    }
+                    className={`w-full px-3.5 py-2.5 pr-10 bg-slate-950 border-2 rounded-xl text-white placeholder-slate-500 text-sm font-semibold transition focus:outline-none ${
+                      recognizedRole === 'admin'
+                        ? 'border-amber-500/80 focus:border-amber-400'
+                        : 'border-blue-500/80 focus:border-blue-400'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                    title={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
               </div>
-
-              <div className="relative">
-                <input
-                  ref={passwordInputRef}
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setErrorMessage(null);
-                  }}
-                  placeholder={
-                    recognizedRole === 'admin'
-                      ? 'Nhập mật khẩu Admin...'
-                      : recognizedRole === 'teacher'
-                      ? 'Nhập mật khẩu giáo viên...'
-                      : 'Nhập mật khẩu...'
-                  }
-                  className={`w-full px-4 py-3 pr-11 bg-slate-950 border-2 rounded-xl text-white placeholder-slate-500 text-sm font-semibold transition focus:outline-none ${
-                    recognizedRole === 'admin'
-                      ? 'border-amber-500/70 focus:border-amber-400'
-                      : recognizedRole === 'teacher'
-                      ? 'border-blue-500/70 focus:border-blue-400'
-                      : 'border-slate-700 focus:border-indigo-500'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-3 text-slate-400 hover:text-white cursor-pointer"
-                  title={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                >
-                  <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                </button>
-              </div>
-            </div>
+            )}
 
             {/* Error Banner */}
             {errorMessage && (
-              <div className="p-3 rounded-xl bg-red-950/70 border border-red-500/40 text-red-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+              <div className="p-2.5 rounded-xl bg-red-950/70 border border-red-500/40 text-red-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
                 <i className="fa-solid fa-circle-exclamation shrink-0 text-red-400"></i>
                 <span>{errorMessage}</span>
               </div>
             )}
 
-            {/* Submit Button */}
+            {/* Action Button */}
             <button
               type="submit"
-              disabled={isVerifyingCloud}
-              className={`w-full py-3.5 px-6 rounded-2xl font-black text-sm sm:text-base text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-60 ${
+              disabled={isVerifyingCloud || isCheckingIdentifier}
+              className={`w-full py-3 px-5 rounded-xl font-black text-sm text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] disabled:opacity-60 ${
                 recognizedRole === 'admin'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/25'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/20'
                   : recognizedRole === 'teacher'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/25'
-                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-indigo-500/25'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/20'
+                  : recognizedRole === 'student'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
+                  : 'bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-100'
               }`}
             >
-              {isVerifyingCloud ? (
+              {isVerifyingCloud || isCheckingIdentifier ? (
                 <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>
               ) : (
-                <i className="fa-solid fa-right-to-bracket text-xs"></i>
+                <i className={`fa-solid ${needsPassword ? 'fa-right-to-bracket' : 'fa-arrow-right'} text-xs`}></i>
               )}
               <span>
                 {isVerifyingCloud
-                  ? 'ĐANG KIỂM TRA TÀI KHOẢN...'
+                  ? 'ĐANG KIỂM TRA...'
+                  : isCheckingIdentifier
+                  ? 'ĐANG NHẬN DIỆN...'
                   : recognizedRole === 'admin'
-                  ? 'ĐĂNG NHẬP VÀO ADMIN'
+                  ? 'ĐĂNG NHẬP ADMIN'
                   : recognizedRole === 'teacher'
                   ? 'ĐĂNG NHẬP GIÁO VIÊN'
-                  : 'ĐĂNG NHẬP HỆ THỐNG'}
+                  : recognizedRole === 'student'
+                  ? 'MỞ TRANG ĐĂNG NHẬP PHÒNG THI'
+                  : 'TIẾP TỤC'}
               </span>
             </button>
           </form>
+
+          <div className="pt-1 text-center">
+            <button
+              type="button"
+              onClick={() => onGoToStudentExam(null)}
+              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 hover:underline transition cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <i className="fa-solid fa-graduation-cap text-[11px]"></i>
+              <span>Bạn là học sinh? Mở trang phòng thi →</span>
+            </button>
+          </div>
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="max-w-xl w-full mx-auto text-center pt-2 text-[11px] text-slate-500">
-        <p>© 2026 iSMART LMS • Hệ thống khảo thí độc lập & phân quyền RBAC</p>
+      <footer className="max-w-lg w-full mx-auto text-center pt-2 text-[11px] text-slate-500">
+        <p>© 2026 {displayAppName} • Hệ thống khảo thí độc lập & phân quyền RBAC</p>
       </footer>
     </div>
   );

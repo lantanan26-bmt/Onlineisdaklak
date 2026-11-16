@@ -259,7 +259,7 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
             }`}
           >
             <i className="fa-solid fa-image"></i>
-            <span>{part.img ? (part.imageTitle ? `Ảnh: ${part.imageTitle}` : 'Đã có Ảnh chung') : '+ Ảnh & Tên ảnh'}</span>
+            <span>{part.img ? (part.imageTitle ? (<>Ảnh: <span data-preserve-content="true">{part.imageTitle}</span></>) : 'Đã có Ảnh chung') : '+ Ảnh & Tên ảnh'}</span>
             <i className={`fa-solid ${showImageConfig ? 'fa-chevron-up' : 'fa-chevron-down'} text-[10px]`}></i>
           </button>
 
@@ -477,7 +477,7 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
                 />
               </div>
               {part.imageTitle && part.imageTitle.trim().length > 0 && (
-                <div className="text-base font-black text-amber-300 uppercase tracking-widest pt-1 font-serif">
+                <div className="text-base font-black text-amber-300 uppercase tracking-widest pt-1 font-serif" data-preserve-content="true">
                   {part.imageTitle.trim()}
                 </div>
               )}

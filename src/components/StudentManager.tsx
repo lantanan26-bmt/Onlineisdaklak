@@ -417,7 +417,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold"
                   >
                     <span>
-                      🏫 {sc} ({countInSchool} HS)
+                      🏫 <span data-preserve-content="true">{sc}</span> ({countInSchool} HS)
                     </span>
                     <button
                       type="button"
@@ -514,7 +514,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                   className="w-full px-2.5 py-2 text-xs bg-white border border-slate-300 rounded-xl font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {schools.map((s, idx) => (
-                    <option key={idx} value={s}>
+                    <option key={idx} value={s} data-preserve-content="true">
                       {s}
                     </option>
                   ))}
@@ -665,7 +665,7 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
               >
                 <option value="ALL">-- Tất cả Trường --</option>
                 {schools.map((s, idx) => (
-                  <option key={idx} value={s}>
+                  <option key={idx} value={s} data-preserve-content="true">
                     {s}
                   </option>
                 ))}
@@ -762,17 +762,17 @@ export const StudentManager: React.FC<StudentManagerProps> = ({
                           {idx + 1}
                         </td>
                         <td className="p-3">
-                          <span className="px-2 py-1 rounded bg-blue-50 text-blue-800 font-mono font-bold text-xs">
+                          <span className="px-2 py-1 rounded bg-blue-50 text-blue-800 font-mono font-bold text-xs" data-preserve-content="true">
                             {stu.id}
                           </span>
                         </td>
-                        <td className="p-3 font-bold text-slate-900">{stu.name}</td>
+                        <td className="p-3 font-bold text-slate-900" data-preserve-content="true">{stu.name}</td>
                         <td className="p-3">
-                          <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold">
+                          <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold" data-preserve-content="true">
                             {stu.grade} - {stu.className}
                           </span>
                         </td>
-                        <td className="p-3 font-semibold text-slate-700">{stu.school}</td>
+                        <td className="p-3 font-semibold text-slate-700" data-preserve-content="true">{stu.school}</td>
                         <td className="p-3 text-center">
                           {hasTaken ? (
                             <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px] inline-flex items-center gap-1">

@@ -59,7 +59,7 @@ export const OfflineExamPrinterModal: React.FC<OfflineExamPrinterModalProps> = (
                   className="bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-white font-semibold focus:outline-none focus:ring-1 focus:ring-amber-400"
                 >
                   {gradeExams.map((ge) => (
-                    <option key={ge.id} value={ge.id}>
+                    <option key={ge.id} value={ge.id} data-preserve-content="true">
                       {ge.grade} {ge.className && ge.className !== 'Tất cả các lớp' ? `(${ge.className})` : ''} - {ge.title}
                     </option>
                   ))}
@@ -159,10 +159,10 @@ export const OfflineExamPrinterModal: React.FC<OfflineExamPrinterModalProps> = (
                       {/* Part Title */}
                       <div className="bg-slate-100 p-3 rounded-lg border-l-4 border-indigo-600">
                         <h3 className="text-sm font-black text-slate-900 uppercase">
-                          {p.title} ({p.points} điểm)
+                          <span data-preserve-content="true">{p.title}</span> ({p.points} điểm)
                         </h3>
                         {p.instructions && (
-                          <p className="text-xs text-slate-600 italic mt-0.5">{p.instructions}</p>
+                          <p className="text-xs text-slate-600 italic mt-0.5" data-preserve-content="true">{p.instructions}</p>
                         )}
                       </div>
 
@@ -175,7 +175,7 @@ export const OfflineExamPrinterModal: React.FC<OfflineExamPrinterModalProps> = (
                             className="max-h-56 mx-auto border border-slate-300 rounded-lg object-contain"
                           />
                           {p.imageTitle && (
-                            <span className="block text-xs font-black uppercase tracking-widest text-slate-800 font-serif">
+                            <span className="block text-xs font-black uppercase tracking-widest text-slate-800 font-serif" data-preserve-content="true">
                               {p.imageTitle}
                             </span>
                           )}
@@ -201,7 +201,7 @@ export const OfflineExamPrinterModal: React.FC<OfflineExamPrinterModalProps> = (
                                     Câu {qNumber} ({q.points ?? 0.5}đ):
                                   </span>
                                 )}
-                                <div className="text-xs font-bold text-slate-800 flex-1">
+                                <div className="text-xs font-bold text-slate-800 flex-1" data-preserve-content={q.q ? 'true' : undefined}>
                                   {q.q || 'Quan sát và trả lời:'}
                                 </div>
                               </div>
@@ -223,7 +223,7 @@ export const OfflineExamPrinterModal: React.FC<OfflineExamPrinterModalProps> = (
                                       <span className="w-5 h-5 rounded-full border border-slate-400 font-mono text-[11px] font-bold flex items-center justify-center">
                                         {String.fromCharCode(65 + oi)}
                                       </span>
-                                      <span className="font-medium text-slate-700">{opt.text}</span>
+                                      <span className="font-medium text-slate-700" data-preserve-content="true">{opt.text}</span>
                                     </div>
                                   ))}
                                 </div>

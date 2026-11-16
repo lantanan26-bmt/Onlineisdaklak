@@ -265,34 +265,21 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
             </div>
             <div>
               <h2 className="text-base font-extrabold text-slate-900">
-                Trung Tâm Đồng Bộ &amp; Kiểm Tra Dữ Liệu Firebase Cloud (Gói Spark Miễn Phí)
+                Trung Tâm Đồng Bộ &amp; Kiểm Tra Dữ Liệu Firebase Cloud (Tự Động Tất Cả Tài Khoản)
               </h2>
               <p className="text-xs text-slate-500">
                 {cloudUserEmail ? (
                   <>
-                    Đang đăng nhập Google Cloud: <strong className="text-emerald-700">{cloudUserEmail}</strong>
-                    {cloudUserEmail.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()
-                      ? ' (Quyền Admin Toàn Hệ Thống)'
-                      : ' (Kiểm tra quyền GV hoặc dùng đúng email Admin để ghi Cloud)'}
+                    Đã tự động kết nối Firebase Cloud • Tài khoản Google liên kết: <strong className="text-emerald-700">{cloudUserEmail}</strong>
                   </>
                 ) : (
-                  <>Chưa kết nối tài khoản Google Cloud. Hãy bấm <strong>Kết nối Google Cloud</strong> (dùng email Admin <code>{BOOTSTRAP_ADMIN_EMAIL}</code>) để đẩy &amp; xem dữ liệu trên Firebase.</>
+                  <>Mọi tài khoản (Admin, Giáo viên, Học sinh) đều <strong>tự động kết nối &amp; lưu dữ liệu trực tiếp</strong> lên Firebase Cloud không cần hỏi đăng nhập thêm.</>
                 )}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {!cloudUserEmail && onConnectCloud && (
-              <button
-                type="button"
-                disabled={isCloudSyncing}
-                onClick={onConnectCloud}
-                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-60"
-              >
-                <i className="fa-brands fa-google"></i> Kết nối Google Cloud
-              </button>
-            )}
             {onPushAllToCloud && (
               <button
                 type="button"
@@ -689,6 +676,7 @@ export const JsonConfigView: React.FC<JsonConfigViewProps> = ({
           rows={14}
           value={jsonText}
           onChange={(e) => setJsonText(e.target.value)}
+          data-preserve-content="true"
           className="w-full font-mono text-xs bg-slate-950 text-emerald-400 p-4 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
         />
       </div>

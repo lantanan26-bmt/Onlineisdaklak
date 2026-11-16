@@ -168,7 +168,10 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
         {/* Picture Title / Caption */}
         {part.imageTitle && part.imageTitle.trim().length > 0 && (
           <div className="text-center pt-1.5">
-            <h3 className="text-base sm:text-lg font-black uppercase tracking-widest text-slate-900 font-serif">
+            <h3
+              data-preserve-content="true"
+              className="text-base sm:text-lg font-black uppercase tracking-widest text-slate-900 font-serif"
+            >
               {part.imageTitle.trim()}
             </h3>
           </div>
@@ -202,7 +205,7 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
                 <span className="w-5 h-5 rounded-full bg-amber-500 text-white font-black text-[11px] flex items-center justify-center shrink-0 mt-0.5">
                   {exIdx + 1}
                 </span>
-                <span className="font-bold text-slate-800 leading-snug">
+                <span data-preserve-content="true" className="font-bold text-slate-800 leading-snug">
                   {ex.question}
                 </span>
               </div>
@@ -322,7 +325,7 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
               {/* Statement Sentence */}
               <div className="text-sm sm:text-base font-bold text-slate-900 pl-1 leading-relaxed">
                 <span className="font-black text-teal-800 mr-1.5">{item.localNumber}.</span>
-                <span>{cleanStatement}</span>
+                <span data-preserve-content="true">{cleanStatement}</span>
               </div>
 
               {/* YES / NO Interactive Buttons */}
@@ -401,7 +404,8 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
 
                   {item.q.explanation && (
                     <div className="text-[11px] text-slate-600 pt-1 border-t border-slate-200 italic">
-                      💡 Giải thích: {item.q.explanation}
+                      💡 Giải thích:{' '}
+                      <span data-preserve-content="true">{item.q.explanation}</span>
                     </div>
                   )}
                 </div>
@@ -421,7 +425,9 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full bg-gradient-to-r from-teal-700 to-emerald-700 text-white font-black text-xs sm:text-sm tracking-wider uppercase shadow-xs">
               <i className="fa-solid fa-book-open"></i>
-              <span>{part.title || 'Part 2: Look and read (Yes / No)'}</span>
+              <span data-preserve-content={part.title ? 'true' : undefined}>
+                {part.title || 'Part 2: Look and read (Yes / No)'}
+              </span>
             </span>
             <span className="px-3 py-1 rounded-full bg-teal-50 border border-teal-300 text-teal-900 text-xs font-bold">
               {questionCount} câu hỏi • Thang điểm: <strong>{totalPoints} đ</strong>
@@ -460,12 +466,18 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
         </div>
 
         {/* English instructions */}
-        <div className="text-sm sm:text-base font-black text-teal-950 bg-teal-50/70 py-2 px-5 rounded-2xl border border-teal-200/70 inline-block max-w-3xl">
+        <div
+          data-preserve-content={part.instructions ? 'true' : undefined}
+          className="text-sm sm:text-base font-black text-teal-950 bg-teal-50/70 py-2 px-5 rounded-2xl border border-teal-200/70 inline-block max-w-3xl"
+        >
           {part.instructions || 'Look and read. Write yes or no. There are two examples.'}
         </div>
 
         {/* Vietnamese instructions */}
-        <div className="text-xs sm:text-sm italic font-semibold text-slate-600">
+        <div
+          data-preserve-content={part.subInstructions ? 'true' : undefined}
+          className="text-xs sm:text-sm italic font-semibold text-slate-600"
+        >
           {part.subInstructions || 'Quan sát bức tranh toàn cảnh và đọc các câu dưới đây. Nếu câu nói ĐÚNG với tranh thì chọn YES, nếu câu nói SAI thì chọn NO.'}
         </div>
       </div>
@@ -514,7 +526,12 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
               <div>
                 <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
                   <i className="fa-solid fa-image text-teal-400"></i>
-                  <span>Bức tranh toàn cảnh: {part.imageTitle || 'Part 2 Scene'}</span>
+                  <span>
+                    Bức tranh toàn cảnh:{' '}
+                    <span data-preserve-content={part.imageTitle ? 'true' : undefined}>
+                      {part.imageTitle || 'Part 2 Scene'}
+                    </span>
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-300">
                   Phóng to cực đại để quan sát từng chi tiết nhỏ nhân vật, đồ vật và hoạt động

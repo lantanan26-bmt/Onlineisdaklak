@@ -226,7 +226,8 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
       setFormError('Vui lòng nhập Tên đăng nhập!');
       return;
     }
-    if (!formData.password.trim()) {
+    const canKeepExistingHash = Boolean(editingTeacher && editingTeacher.passHash);
+    if (!formData.password.trim() && !canKeepExistingHash) {
       setFormError('Vui lòng nhập Mật khẩu cho giáo viên!');
       return;
     }
@@ -247,13 +248,15 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
 
     if (editingTeacher) {
       // Update
+      const nextPass = formData.password.trim();
       const updated = teachers.map((t) =>
         t.id === editingTeacher.id
           ? {
               ...t,
               name: formData.name.trim(),
               username: cleanUser,
-              password: formData.password.trim(),
+              password: nextPass || t.password,
+              passHash: nextPass ? undefined : t.passHash,
               email: formData.email.trim(),
               phone: formData.phone.trim(),
               assignedGrades: formData.assignedGrades,
@@ -465,7 +468,7 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-lg font-black shadow-md shadow-blue-500/20 shrink-0">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-lg font-black shadow-md shadow-blue-500/20 shrink-0" data-preserve-content="true">
                       {t.name
                         .split(' ')
                         .filter(Boolean)
@@ -474,7 +477,7 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-base font-black text-slate-900">{t.name}</h3>
+                        <h3 className="text-base font-black text-slate-900" data-preserve-content="true">{t.name}</h3>
                         {!t.isActive && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200">
                             Khóa
@@ -482,10 +485,10 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 font-mono">
-                        <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                        <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200" data-preserve-content="true">
                           {t.id}
                         </span>
-                        <span>@{t.username}</span>
+                        <span data-preserve-content="true">@{t.username}</span>
                       </div>
                     </div>
                   </div>
@@ -557,7 +560,7 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
               {/* Action Buttons */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400 font-mono">
-                  Pass: <strong className="text-slate-700">{t.password}</strong>
+                  Pass: <strong className="text-slate-700">{t.password || '•••••• (Cloud)'}</strong>
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -676,14 +679,14 @@ export const TeacherManager: React.FC<TeacherManagerProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Mật khẩu đăng nhập <span className="text-red-500">*</span>:
+                      Mật khẩu đăng nhập {editingTeacher?.passHash ? '(để trống nếu giữ nguyên)' : <span className="text-red-500">*</span>}:
                     </label>
                     <input
                       type="text"
-                      required
+                      required={!editingTeacher?.passHash}
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      placeholder="Nhập mật khẩu..."
+                      placeholder={editingTeacher?.passHash ? 'Để trống để giữ nguyên mật khẩu hiện tại...' : 'Nhập mật khẩu...'}
                       className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
