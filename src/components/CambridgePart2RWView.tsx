@@ -72,11 +72,30 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
   // Scene image: priority from part.img, fallback to first question with an image, or standard party scene
   const sceneImage = part.img || items.find((it) => it.q.img)?.q.img || GRADE2_MEDIA?.partyBackyard;
 
-  const playTTS = (text: string) => {
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+
+  const stopTTS = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeakingIdx(null);
+  };
+
+  const playTTS = (text: string, qIdx: number) => {
     if (!text) return;
+    if (speakingIdx === qIdx) {
+      stopTTS();
+      return;
+    }
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
     const clean = text.replace(/<[^>]*>/g, '').trim();
     const utter = new SpeechSynthesisUtterance(clean);
     utter.lang = 'en-US';
+    utter.onstart = () => setSpeakingIdx(qIdx);
+    utter.onend = () => setSpeakingIdx(null);
+    utter.onerror = () => setSpeakingIdx(null);
+    setSpeakingIdx(qIdx);
     window.speechSynthesis.speak(utter);
     showToast('Đang phát giọng đọc mẫu...', 'info');
   };
@@ -297,17 +316,21 @@ export const CambridgePart2RWView: React.FC<CambridgePart2RWViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* TTS speaker button */}
+                  {/* TTS speaker / stop button */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      playTTS(cleanStatement);
+                      playTTS(cleanStatement, item.originalIndex);
                     }}
-                    className="w-7 h-7 rounded-lg bg-teal-100 hover:bg-teal-200 text-teal-900 flex items-center justify-center text-xs transition cursor-pointer"
-                    title="Nghe phát âm câu này (TTS)"
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer ${
+                      speakingIdx === item.originalIndex
+                        ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                        : 'bg-teal-100 hover:bg-teal-200 text-teal-900'
+                    }`}
+                    title={speakingIdx === item.originalIndex ? 'Dừng phát âm câu này' : 'Nghe phát âm câu này (TTS)'}
                   >
-                    <i className="fa-solid fa-volume-high"></i>
+                    <i className={`fa-solid ${speakingIdx === item.originalIndex ? 'fa-stop' : 'fa-volume-high'}`}></i>
                   </button>
 
                   {hasAnswered ? (

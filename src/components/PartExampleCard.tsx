@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PartExample } from '../types';
 
 interface PartExampleCardProps {
@@ -16,32 +16,65 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleStopAudio = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      try {
+        audioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    setIsPlayingAudio(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      handleStopAudio();
+    };
+  }, []);
 
   const handlePlayAudio = () => {
     if (!example.audio) return;
+    handleStopAudio();
     if (example.audio.startsWith('tts:')) {
       const text = example.audio.replace(/^tts:/, '');
       if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = 'en-US';
         utter.rate = 0.9;
         utter.onstart = () => setIsPlayingAudio(true);
         utter.onend = () => setIsPlayingAudio(false);
         utter.onerror = () => setIsPlayingAudio(false);
+        setIsPlayingAudio(true);
         window.speechSynthesis.speak(utter);
       }
-    } else {
-      const a = new Audio(example.audio);
-      setIsPlayingAudio(true);
-      a.onended = () => setIsPlayingAudio(false);
-      a.onerror = () => setIsPlayingAudio(false);
-      a.play().catch(() => setIsPlayingAudio(false));
+    } else if (audioRef.current) {
+      audioRef.current.src = example.audio;
+      try {
+        audioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      audioRef.current
+        .play()
+        .then(() => setIsPlayingAudio(true))
+        .catch(() => setIsPlayingAudio(false));
     }
   };
 
   return (
     <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50/90 via-orange-50/50 to-amber-50/70 p-4 sm:p-5 shadow-sm text-slate-900 space-y-3.5 transition-all">
+      <audio
+        ref={audioRef}
+        onEnded={() => setIsPlayingAudio(false)}
+        onError={() => setIsPlayingAudio(false)}
+      />
       {/* Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2.5 border-b border-amber-200/80">
         <div className="flex items-center gap-2 flex-wrap">
@@ -68,21 +101,34 @@ export const PartExampleCard: React.FC<PartExampleCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {example.audio && (
-            <button
-              type="button"
-              onClick={handlePlayAudio}
-              className={`px-3 py-1.5 rounded-xl font-black text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                isPlayingAudio
-                  ? 'bg-amber-600 text-white animate-pulse'
-                  : 'bg-white hover:bg-amber-100 text-amber-900 border border-amber-300'
-              }`}
-              title="Lắng nghe audio phát âm câu ví dụ"
-            >
-              <i className={`fa-solid ${isPlayingAudio ? 'fa-volume-high' : 'fa-play'}`}></i>
-              <span>{isPlayingAudio ? 'Đang phát audio ví dụ...' : 'Nghe audio ví dụ'}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handlePlayAudio}
+                className={`px-3 py-1.5 rounded-xl font-black text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                  isPlayingAudio
+                    ? 'bg-amber-600 text-white animate-pulse'
+                    : 'bg-white hover:bg-amber-100 text-amber-900 border border-amber-300'
+                }`}
+                title="Lắng nghe audio phát âm câu ví dụ"
+              >
+                <i className={`fa-solid ${isPlayingAudio ? 'fa-volume-high' : 'fa-play'}`}></i>
+                <span>{isPlayingAudio ? 'Đang phát audio ví dụ...' : 'Nghe audio ví dụ'}</span>
+              </button>
+              {isPlayingAudio && (
+                <button
+                  type="button"
+                  onClick={handleStopAudio}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs transition flex items-center gap-1 cursor-pointer shadow-xs"
+                  title="Dừng audio đang phát"
+                >
+                  <i className="fa-solid fa-stop"></i>
+                  <span>Dừng audio test</span>
+                </button>
+              )}
+            </>
           )}
 
           <button

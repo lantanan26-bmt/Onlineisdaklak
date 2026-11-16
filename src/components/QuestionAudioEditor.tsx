@@ -61,8 +61,25 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
   const [isPreviewPlaying, setIsPreviewPlaying] = useState<boolean>(false);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Stop preview cleanly (both TTS and HTML audio)
+  const handleStopPreview = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore if media not loaded yet
+      }
+    }
+    setIsPreviewPlaying(false);
+  };
+
   // Sync internal state if audio prop changes externally
   useEffect(() => {
+    handleStopPreview();
     if (audio.startsWith('tts:')) {
       setTtsText(audio.replace(/^tts:/, ''));
       setMode('tts');
@@ -75,6 +92,7 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
       setMode('upload');
       setIsOpen(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audio]);
 
   // Clean up recording & audio on unmount
@@ -113,7 +131,7 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
       return;
     }
 
-    window.speechSynthesis.cancel();
+    handleStopPreview();
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = audioVoice || 'en-US';
     utter.rate = audioSpeed || 1.0;
@@ -122,35 +140,50 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
     utter.onend = () => setIsPreviewPlaying(false);
     utter.onerror = () => setIsPreviewPlaying(false);
 
+    setIsPreviewPlaying(true);
     window.speechSynthesis.speak(utter);
     showToast('Đang phát giọng đọc mẫu TTS...', 'info');
   };
 
-  // Stop preview
-  const handleStopPreview = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    if (previewAudioRef.current) {
-      previewAudioRef.current.pause();
-      previewAudioRef.current.currentTime = 0;
-    }
-    setIsPreviewPlaying(false);
-  };
-
-  // Preview standard audio
+  // Preview standard audio (uploaded file, recorded blob, or URL link)
   const handlePreviewAudio = (audioSrc: string) => {
-    if (!audioSrc) return;
-    if (isPreviewPlaying) {
-      handleStopPreview();
+    const cleanSrc = (audioSrc || '').trim();
+    if (!cleanSrc) {
+      showToast('Chưa có file hoặc đường dẫn audio để nghe thử!', 'warn');
       return;
     }
+    if (cleanSrc.startsWith('tts:')) {
+      handleStopPreview();
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const utter = new SpeechSynthesisUtterance(cleanSrc.replace(/^tts:/, '').trim() || 'Listen.');
+        utter.lang = audioVoice || 'en-US';
+        utter.rate = audioSpeed || 1.0;
+        utter.onstart = () => setIsPreviewPlaying(true);
+        utter.onend = () => setIsPreviewPlaying(false);
+        utter.onerror = () => setIsPreviewPlaying(false);
+        setIsPreviewPlaying(true);
+        window.speechSynthesis.speak(utter);
+      }
+      return;
+    }
+
+    handleStopPreview();
     if (previewAudioRef.current) {
-      previewAudioRef.current.src = audioSrc;
+      previewAudioRef.current.src = cleanSrc;
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
       previewAudioRef.current
         .play()
-        .then(() => setIsPreviewPlaying(true))
-        .catch(() => showToast('Không thể phát file âm thanh này!', 'warn'));
+        .then(() => {
+          setIsPreviewPlaying(true);
+        })
+        .catch(() => {
+          setIsPreviewPlaying(false);
+          showToast('Không thể phát file hoặc đường dẫn âm thanh này!', 'warn');
+        });
     }
   };
 
@@ -299,7 +332,35 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {hasAudio && (
+            <>
+              <button
+                type="button"
+                onClick={() => handlePreviewAudio(audio)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1 cursor-pointer"
+                title="Nghe thử audio câu hỏi"
+              >
+                <i className="fa-solid fa-play"></i>
+                <span>Nghe thử</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleStopPreview}
+                disabled={!isPreviewPlaying}
+                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition flex items-center gap-1 ${
+                  isPreviewPlaying
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                    : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                }`}
+                title="Dừng audio đang chạy thử"
+              >
+                <i className="fa-solid fa-stop"></i>
+                <span>Dừng audio test</span>
+              </button>
+            </>
+          )}
+
           {!isOpen && !hasAudio && (
             <button
               type="button"
@@ -310,7 +371,7 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
             </button>
           )}
 
-          {isOpen && (
+          {(isOpen || hasAudio) && (
             <button
               type="button"
               onClick={() => setIsOpen(!isOpen)}
@@ -441,23 +502,26 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 </p>
 
                 <div className="flex items-center gap-2">
-                  {isPreviewPlaying ? (
-                    <button
-                      type="button"
-                      onClick={handleStopPreview}
-                      className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <i className="fa-solid fa-stop"></i> Dừng nghe thử
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handlePreviewTts}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <i className="fa-solid fa-play"></i> Nghe thử giọng đọc TTS
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handlePreviewTts}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <i className="fa-solid fa-play"></i> Nghe thử giọng đọc TTS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStopPreview}
+                    disabled={!isPreviewPlaying}
+                    className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition flex items-center gap-1.5 ${
+                      isPreviewPlaying
+                        ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                        : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    }`}
+                    title="Dừng audio đang chạy thử"
+                  >
+                    <i className="fa-solid fa-stop"></i> Dừng audio test
+                  </button>
                 </div>
               </div>
             </div>
@@ -470,7 +534,7 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 Tải lên tệp âm thanh (MP3, WAV, M4A, OGG):
               </label>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <label className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer active:scale-95">
                   <i className="fa-solid fa-file-audio"></i>
                   <span>Chọn file âm thanh từ máy tính</span>
@@ -483,14 +547,30 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 </label>
 
                 {audio && !audio.startsWith('tts:') && (
-                  <button
-                    type="button"
-                    onClick={() => handlePreviewAudio(audio)}
-                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-300"
-                  >
-                    <i className={`fa-solid ${isPreviewPlaying ? 'fa-pause text-amber-600' : 'fa-play text-emerald-600'}`}></i>
-                    <span>{isPreviewPlaying ? 'Tạm dừng nghe thử' : 'Nghe thử file'}</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePreviewAudio(audio)}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <i className="fa-solid fa-play"></i>
+                      <span>Nghe thử file</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopPreview}
+                      disabled={!isPreviewPlaying}
+                      className={`px-3 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                        isPreviewPlaying
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                          : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      }`}
+                      title="Dừng audio đang chạy thử"
+                    >
+                      <i className="fa-solid fa-stop"></i>
+                      <span>Dừng audio test</span>
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -520,7 +600,7 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 {!isRecording ? (
                   <button
                     type="button"
@@ -540,14 +620,30 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 )}
 
                 {audio && !isRecording && (
-                  <button
-                    type="button"
-                    onClick={() => handlePreviewAudio(audio)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-300"
-                  >
-                    <i className={`fa-solid ${isPreviewPlaying ? 'fa-pause' : 'fa-play text-emerald-600'}`}></i>
-                    <span>{isPreviewPlaying ? 'Dừng phát' : 'Nghe lại bản ghi'}</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePreviewAudio(audio)}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <i className="fa-solid fa-play"></i>
+                      <span>Nghe lại bản ghi</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopPreview}
+                      disabled={!isPreviewPlaying}
+                      className={`px-3.5 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                        isPreviewPlaying
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                          : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      }`}
+                      title="Dừng audio đang chạy thử"
+                    >
+                      <i className="fa-solid fa-stop"></i>
+                      <span>Dừng audio test</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -559,13 +655,13 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
               <label className="block text-xs font-extrabold text-slate-700">
                 Nhập đường dẫn URL âm thanh trực tuyến (MP3 / WAV):
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="url"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                   placeholder="https://example.com/audio/unit1-listening.mp3"
-                  className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  className="flex-1 min-w-[200px] px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                 />
                 <button
                   type="button"
@@ -574,14 +670,32 @@ export const QuestionAudioEditor: React.FC<QuestionAudioEditorProps> = ({
                 >
                   Lưu link
                 </button>
-                {urlInput && (
-                  <button
-                    type="button"
-                    onClick={() => handlePreviewAudio(urlInput)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-200 transition cursor-pointer"
-                  >
-                    <i className="fa-solid fa-play text-emerald-600"></i>
-                  </button>
+                {(urlInput.trim() || (audio && !audio.startsWith('tts:'))) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePreviewAudio(urlInput.trim() || audio)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                      title="Nghe thử link audio"
+                    >
+                      <i className="fa-solid fa-play"></i>
+                      <span>Nghe thử</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopPreview}
+                      disabled={!isPreviewPlaying}
+                      className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                        isPreviewPlaying
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                          : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      }`}
+                      title="Dừng audio đang chạy thử"
+                    >
+                      <i className="fa-solid fa-stop"></i>
+                      <span>Dừng audio test</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>

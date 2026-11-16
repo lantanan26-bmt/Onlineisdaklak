@@ -157,6 +157,12 @@ export const AudioPlayerBox: React.FC<AudioPlayerBoxProps> = ({
     }
   };
 
+  const handleStop = () => {
+    stopAudio();
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
   const handleReplay = () => {
     if (isLimitReached) {
       showToast(`Em đã nghe đủ ${maxPlayCount}/${maxPlayCount} lượt quy định!`, 'warn');
@@ -270,6 +276,23 @@ export const AudioPlayerBox: React.FC<AudioPlayerBoxProps> = ({
           >
             <i className={`fa-solid ${isPlaying ? 'fa-pause text-base' : 'fa-play text-base text-emerald-700'}`}></i>
             <span>{isPlaying ? 'Tạm dừng' : isLimitReached ? 'Đã hết lượt' : 'Phát âm thanh'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!isPlaying && currentTime === 0}
+            onClick={handleStop}
+            title="Dừng hẳn âm thanh"
+            className={`px-3 h-10 rounded-xl font-black text-xs flex items-center gap-1.5 transition cursor-pointer ${
+              isPlaying
+                ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-md border border-rose-300'
+                : currentTime > 0
+                ? 'bg-white/20 hover:bg-white/30 text-white'
+                : 'bg-white/10 text-white/40 cursor-not-allowed'
+            }`}
+          >
+            <i className="fa-solid fa-stop"></i>
+            <span>Dừng</span>
           </button>
 
           <button

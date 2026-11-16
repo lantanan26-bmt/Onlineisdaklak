@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ExamPart, QuestionType } from '../types';
 
 interface AdminPartHeaderProps {
@@ -43,22 +43,76 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
   const [showExampleConfig, setShowExampleConfig] = useState(false);
   const [showImageConfig, setShowImageConfig] = useState(false);
   const [ttsInput, setTtsInput] = useState(part.audio?.startsWith('tts:') ? part.audio.replace(/^tts:/, '') : '');
+  const [playingTarget, setPlayingTarget] = useState<'none' | 'part' | 'example'>('none');
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const currentSection = part.section || (part.title.toLowerCase().includes('listen') ? 'listening' : 'reading-writing');
   const isListening = currentSection === 'listening';
   const isPointsBalanced = Math.abs(questionsTotalPoints - part.points) < 0.01;
 
-  const handlePlayAudio = () => {
-    if (!part.audio) return;
-    if (part.audio.startsWith('tts:')) {
-      const text = part.audio.replace(/^tts:/, '');
+  const handleStopAudio = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    setPlayingTarget('none');
+  };
+
+  useEffect(() => {
+    return () => {
+      handleStopAudio();
+    };
+  }, []);
+
+  const handlePlayAudioSource = (rawAudio?: string, target: 'part' | 'example' = 'part') => {
+    const clean = (rawAudio || '').trim();
+    if (!clean) {
+      showToast('Chưa có file, đường dẫn URL hoặc nội dung TTS để nghe thử!', 'warn');
+      return;
+    }
+    handleStopAudio();
+
+    if (clean.startsWith('tts:')) {
+      const text = clean.replace(/^tts:/, '').trim();
+      if (!text) {
+        showToast('Nội dung bài nghe TTS đang trống!', 'warn');
+        return;
+      }
+      if (typeof window === 'undefined' || !window.speechSynthesis) {
+        showToast('Trình duyệt không hỗ trợ Web Speech Synthesis!', 'warn');
+        return;
+      }
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'en-US';
+      utter.onstart = () => setPlayingTarget(target);
+      utter.onend = () => setPlayingTarget('none');
+      utter.onerror = () => setPlayingTarget('none');
+      setPlayingTarget(target);
       window.speechSynthesis.speak(utter);
-      showToast('Đang phát giọng đọc TTS của Part...', 'info');
-    } else {
-      const a = new Audio(part.audio);
-      a.play().catch(() => showToast('Không thể phát file âm thanh URL này', 'warn'));
+      showToast(target === 'example' ? 'Đang phát audio ví dụ (TTS)...' : 'Đang phát giọng đọc TTS của Part...', 'info');
+    } else if (previewAudioRef.current) {
+      previewAudioRef.current.src = clean;
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      previewAudioRef.current
+        .play()
+        .then(() => {
+          setPlayingTarget(target);
+        })
+        .catch(() => {
+          setPlayingTarget('none');
+          showToast('Không thể phát file âm thanh hoặc đường dẫn URL này!', 'warn');
+        });
     }
   };
 
@@ -68,6 +122,11 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
         ? 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-indigo-400/50'
         : 'bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 border-teal-400/50'
     }`}>
+      <audio
+        ref={previewAudioRef}
+        onEnded={() => setPlayingTarget('none')}
+        onError={() => setPlayingTarget('none')}
+      />
       {/* Top row: Section Selector, Part Number, Title input, Part Points, Actions */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 flex-1 min-w-[280px] flex-wrap sm:flex-nowrap">
@@ -239,13 +298,29 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
           </button>
 
           {part.audio && (
-            <button
-              type="button"
-              onClick={handlePlayAudio}
-              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1 cursor-pointer"
-            >
-              <i className="fa-solid fa-play"></i> Nghe thử
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => handlePlayAudioSource(part.audio, 'part')}
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1 cursor-pointer"
+                title="Nghe thử audio chung của Part"
+              >
+                <i className="fa-solid fa-play"></i> Nghe thử
+              </button>
+              <button
+                type="button"
+                onClick={handleStopAudio}
+                disabled={playingTarget === 'none'}
+                className={`px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 ${
+                  playingTarget !== 'none'
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer animate-pulse'
+                    : 'bg-white/10 text-white/40 cursor-not-allowed'
+                }`}
+                title="Dừng audio đang chạy thử"
+              >
+                <i className="fa-solid fa-stop"></i> Dừng audio test
+              </button>
+            </>
           )}
 
           {/* Image & Image Title Config Toggle Button */}
@@ -316,11 +391,12 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  handleStopAudio();
                   onUpdatePart({ audio: undefined, audioScript: undefined });
                   setTtsInput('');
                   showToast('Đã xóa audio chung của Part', 'info');
                 }}
-                className="text-red-400 hover:text-red-300 text-xs font-bold"
+                className="text-red-400 hover:text-red-300 text-xs font-bold cursor-pointer"
               >
                 Xóa audio chung
               </button>
@@ -328,15 +404,15 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="block text-slate-300 font-bold">Giọng đọc mẫu TTS (AI Đọc đề bài Part):</label>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 <input
                   type="text"
                   value={ttsInput}
                   onChange={(e) => setTtsInput(e.target.value)}
                   placeholder="Nhập nội dung bài đọc bằng tiếng Anh..."
-                  className="flex-1 bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
+                  className="flex-1 min-w-[160px] bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
                 />
                 <button
                   type="button"
@@ -349,18 +425,48 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
                 >
                   Lưu TTS
                 </button>
+                {(ttsInput.trim() || part.audio?.startsWith('tts:')) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handlePlayAudioSource(
+                          ttsInput.trim() ? `tts:${ttsInput.trim()}` : part.audio,
+                          'part'
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1"
+                      title="Nghe thử TTS"
+                    >
+                      <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopAudio}
+                      disabled={playingTarget === 'none'}
+                      className={`px-2.5 py-1.5 rounded-lg font-bold shrink-0 flex items-center gap-1 transition ${
+                        playingTarget !== 'none'
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                          : 'bg-white/10 text-white/40 cursor-not-allowed'
+                      }`}
+                      title="Dừng audio đang chạy thử"
+                    >
+                      <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="block text-slate-300 font-bold">Hoặc Tải file MP3 / Dán URL âm thanh:</label>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 <input
                   type="text"
                   value={part.audio && !part.audio.startsWith('tts:') ? part.audio : ''}
                   onChange={(e) => onUpdatePart({ audio: e.target.value })}
                   placeholder="https://... hoặc data:audio..."
-                  className="flex-1 bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
+                  className="flex-1 min-w-[160px] bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
                 />
                 <label className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1">
                   <i className="fa-solid fa-upload"></i> Chọn file
@@ -381,6 +487,31 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
                     }}
                   />
                 </label>
+                {part.audio && !part.audio.startsWith('tts:') && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePlayAudioSource(part.audio, 'part')}
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1"
+                      title="Nghe thử file hoặc link audio"
+                    >
+                      <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopAudio}
+                      disabled={playingTarget === 'none'}
+                      className={`px-2.5 py-1.5 rounded-lg font-bold shrink-0 flex items-center gap-1 transition ${
+                        playingTarget !== 'none'
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                          : 'bg-white/10 text-white/40 cursor-not-allowed'
+                      }`}
+                      title="Dừng audio đang chạy thử"
+                    >
+                      <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -776,18 +907,66 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block text-amber-200 font-bold">Audio ví dụ (TTS hoặc URL file):</label>
-                  <input
-                    type="text"
-                    value={part.example.audio || ''}
-                    onChange={(e) =>
-                      onUpdatePart({
-                        example: { ...part.example!, audio: e.target.value }
-                      })
-                    }
-                    placeholder="tts:Nội dung tiếng Anh hoặc https://..."
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
-                  />
+                  <label className="block text-amber-200 font-bold">Audio ví dụ (TTS, tải file hoặc URL file):</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    <input
+                      type="text"
+                      value={part.example.audio || ''}
+                      onChange={(e) =>
+                        onUpdatePart({
+                          example: { ...part.example!, audio: e.target.value }
+                        })
+                      }
+                      placeholder="tts:Nội dung tiếng Anh hoặc https://..."
+                      className="flex-1 min-w-[160px] bg-white/10 border border-white/20 rounded-lg px-2.5 py-1.5 text-white placeholder-white/30 text-xs"
+                    />
+                    <label className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1">
+                      <i className="fa-solid fa-upload"></i> Chọn file
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            const url = ev.target?.result as string;
+                            onUpdatePart({
+                              example: { ...part.example!, audio: url }
+                            });
+                            showToast('Đã tải audio ví dụ thành công!');
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </label>
+                    {part.example.audio && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handlePlayAudioSource(part.example?.audio, 'example')}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0 cursor-pointer flex items-center gap-1"
+                          title="Nghe thử audio ví dụ"
+                        >
+                          <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleStopAudio}
+                          disabled={playingTarget === 'none'}
+                          className={`px-2.5 py-1.5 rounded-lg font-bold shrink-0 flex items-center gap-1 transition ${
+                            playingTarget !== 'none'
+                              ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                              : 'bg-white/10 text-white/40 cursor-not-allowed'
+                          }`}
+                          title="Dừng audio đang chạy thử"
+                        >
+                          <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-1">

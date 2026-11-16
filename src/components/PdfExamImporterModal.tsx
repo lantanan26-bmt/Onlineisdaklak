@@ -66,10 +66,12 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
   // Audio configuration in question builder
   const [audioMode, setAudioMode] = useState<'tts' | 'record' | 'upload' | 'url'>('tts');
   const [qAudio, setQAudio] = useState<string>('');
+  const [audioUrlInput, setAudioUrlInput] = useState<string>('');
   const [ttsScript, setTtsScript] = useState<string>('');
   const [maxPlayCount, setMaxPlayCount] = useState<number>(2);
   const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(false);
   const [isAudioPreviewPlaying, setIsAudioPreviewPlaying] = useState<boolean>(false);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Microphone recording state inside modal
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -112,6 +114,9 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
   useEffect(() => {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+      }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -321,6 +326,21 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
     showToast('Đã chụp toàn bộ trang làm ảnh câu hỏi!', 'success');
   };
 
+  const handleStopTts = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    setIsAudioPreviewPlaying(false);
+  };
+
   // Preview TTS Audio
   const handlePreviewTts = () => {
     const text = ttsScript.trim() || qAudio.replace(/^tts:/, '').trim();
@@ -330,7 +350,7 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
     }
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
-    window.speechSynthesis.cancel();
+    handleStopTts();
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = 'en-US';
     utter.rate = 0.95;
@@ -339,15 +359,49 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
     utter.onend = () => setIsAudioPreviewPlaying(false);
     utter.onerror = () => setIsAudioPreviewPlaying(false);
 
+    setIsAudioPreviewPlaying(true);
     window.speechSynthesis.speak(utter);
     showToast('Đang phát giọng đọc mẫu TTS...', 'info');
   };
 
-  const handleStopTts = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+  // Preview standard audio (uploaded file, recorded blob, or URL link)
+  const handlePreviewAudioSrc = (src: string) => {
+    const clean = (src || '').trim();
+    if (!clean) {
+      showToast('Chưa có file hoặc link audio để nghe thử!', 'warn');
+      return;
     }
-    setIsAudioPreviewPlaying(false);
+    if (clean.startsWith('tts:')) {
+      handleStopTts();
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const utter = new SpeechSynthesisUtterance(clean.replace(/^tts:/, '').trim() || 'Listen.');
+        utter.lang = 'en-US';
+        utter.rate = 0.95;
+        utter.onstart = () => setIsAudioPreviewPlaying(true);
+        utter.onend = () => setIsAudioPreviewPlaying(false);
+        utter.onerror = () => setIsAudioPreviewPlaying(false);
+        setIsAudioPreviewPlaying(true);
+        window.speechSynthesis.speak(utter);
+      }
+      return;
+    }
+
+    handleStopTts();
+    if (previewAudioRef.current) {
+      previewAudioRef.current.src = clean;
+      try {
+        previewAudioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      previewAudioRef.current
+        .play()
+        .then(() => setIsAudioPreviewPlaying(true))
+        .catch(() => {
+          setIsAudioPreviewPlaying(false);
+          showToast('Không thể phát file hoặc đường dẫn âm thanh này!', 'warn');
+        });
+    }
   };
 
   // Microphone recording
@@ -462,6 +516,8 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
     let finalAudio = qAudio;
     if (audioMode === 'tts' && ttsScript.trim()) {
       finalAudio = `tts:${ttsScript.trim()}`;
+    } else if (audioMode === 'url' && audioUrlInput.trim()) {
+      finalAudio = audioUrlInput.trim();
     }
 
     const newQ: Question = {
@@ -508,10 +564,12 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
     showToast(`Đã thêm thành công câu hỏi vào đề thi! (Đã nạp: ${createdCount + 1} câu)`, 'success');
 
     // Reset some fields for next question but keep page open
+    handleStopTts();
     setQImage('');
     setQPrompt('');
     setTtsScript('');
     setQAudio('');
+    setAudioUrlInput('');
     setSelection(null);
   };
 
@@ -519,6 +577,11 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in">
+      <audio
+        ref={previewAudioRef}
+        onEnded={() => setIsAudioPreviewPlaying(false)}
+        onError={() => setIsAudioPreviewPlaying(false)}
+      />
       <div className="bg-white w-full max-w-7xl h-[95vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
         {/* Top Header */}
         <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white px-5 py-3.5 flex items-center justify-between gap-4">
@@ -1024,7 +1087,7 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                     </label>
 
                     {/* Audio Mode Tabs */}
-                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 flex-wrap">
                       <button
                         type="button"
                         onClick={() => setAudioMode('tts')}
@@ -1052,6 +1115,15 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                       >
                         Tải file
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setAudioMode('url')}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded cursor-pointer ${
+                          audioMode === 'url' ? 'bg-indigo-600 text-white' : 'text-slate-600'
+                        }`}
+                      >
+                        Link URL
+                      </button>
                     </div>
                   </div>
 
@@ -1068,19 +1140,11 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                         placeholder="Nhập lời thoại tiếng Anh để hệ thống đọc cho học sinh nghe..."
                         className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
                       />
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between flex-wrap gap-1.5">
                         <span className="text-[10px] text-slate-500">
                           Học sinh sẽ nghe giọng đọc phát âm chuẩn tiếng Anh.
                         </span>
-                        {isAudioPreviewPlaying ? (
-                          <button
-                            type="button"
-                            onClick={handleStopTts}
-                            className="px-2.5 py-1 rounded bg-amber-500 text-white text-[11px] font-bold cursor-pointer"
-                          >
-                            Dừng nghe
-                          </button>
-                        ) : (
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={handlePreviewTts}
@@ -1088,47 +1152,146 @@ export const PdfExamImporterModal: React.FC<PdfExamImporterModalProps> = ({
                           >
                             <i className="fa-solid fa-play text-[10px]"></i> Nghe thử TTS
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            onClick={handleStopTts}
+                            disabled={!isAudioPreviewPlaying}
+                            className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition ${
+                              isAudioPreviewPlaying
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                                : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* Mode Record */}
                   {audioMode === 'record' && (
-                    <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between gap-2">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs text-slate-700 font-medium">
                         {isRecording ? `🔴 Đang ghi âm (${recordSeconds}s)...` : 'Microphone giáo viên'}
                       </span>
-                      {!isRecording ? (
-                        <button
-                          type="button"
-                          onClick={handleStartRecording}
-                          className="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
-                        >
-                          <i className="fa-solid fa-microphone"></i> Bắt đầu ghi
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleStopRecording}
-                          className="px-3 py-1 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer"
-                        >
-                          Dừng & Lưu
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {!isRecording ? (
+                          <button
+                            type="button"
+                            onClick={handleStartRecording}
+                            className="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-microphone"></i> Bắt đầu ghi
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleStopRecording}
+                            className="px-3 py-1 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer"
+                          >
+                            Dừng & Lưu
+                          </button>
+                        )}
+                        {qAudio && !qAudio.startsWith('tts:') && !isRecording && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewAudioSrc(qAudio)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                            >
+                              <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleStopTts}
+                              disabled={!isAudioPreviewPlaying}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition ${
+                                isAudioPreviewPlaying
+                                  ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                                  : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
 
                   {/* Mode Upload */}
                   {audioMode === 'upload' && (
-                    <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between gap-2">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                       <label className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer flex items-center gap-1">
                         <i className="fa-solid fa-upload"></i> Chọn file MP3/WAV
                         <input type="file" accept="audio/*" onChange={handleAudioFileUpload} className="hidden" />
                       </label>
                       {qAudio && !qAudio.startsWith('tts:') && (
-                        <span className="text-xs text-emerald-700 font-bold">✅ Đã có file audio</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] text-emerald-700 font-bold">✅ Đã có file audio</span>
+                          <button
+                            type="button"
+                            onClick={() => handlePreviewAudioSrc(qAudio)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleStopTts}
+                            disabled={!isAudioPreviewPlaying}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition ${
+                              isAudioPreviewPlaying
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                                : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                          </button>
+                        </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Mode URL */}
+                  {audioMode === 'url' && (
+                    <div className="p-2 bg-white rounded-lg border border-slate-200 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <input
+                          type="url"
+                          value={audioUrlInput}
+                          onChange={(e) => {
+                            setAudioUrlInput(e.target.value);
+                            setQAudio(e.target.value.trim());
+                          }}
+                          placeholder="https://example.com/audio.mp3"
+                          className="flex-1 min-w-[160px] px-2.5 py-1 text-xs bg-slate-50 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {(audioUrlInput.trim() || (qAudio && !qAudio.startsWith('tts:'))) && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewAudioSrc(audioUrlInput.trim() || qAudio)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                            >
+                              <i className="fa-solid fa-play text-[10px]"></i> Nghe thử
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleStopTts}
+                              disabled={!isAudioPreviewPlaying}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition ${
+                                isAudioPreviewPlaying
+                                  ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer animate-pulse'
+                                  : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <i className="fa-solid fa-stop text-[10px]"></i> Dừng audio test
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
 
