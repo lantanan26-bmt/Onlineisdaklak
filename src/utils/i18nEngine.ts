@@ -160,6 +160,7 @@ const EXACT_MAP: Record<string, string> = {
   'Chấm bài thi của học sinh bằng camera điện thoại hoặc tải ảnh chụp bài thi':
     'Grade student paper exams using phone camera or uploaded photos',
   '🖨️ In Đề Thi Offline': '🖨️ Print Offline Exam',
+  'In Đề Thi Offline': 'Print Offline Exam',
   'In đề thi giấy và phiếu trả lời trắc nghiệm cho học sinh làm bài offline':
     'Print exam papers and answer sheets for offline testing',
   'Nạp Đề Từ File PDF': 'Import from PDF',

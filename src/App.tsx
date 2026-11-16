@@ -2503,33 +2503,34 @@ export default function App() {
           </div>
         </header>
       ) : (
-        /* 2. Admin & Teacher Header */
-        <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-30">
-          <div className="w-full px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+        /* 2. Admin & Teacher Header (Non-sticky & Compact) */
+        <header className="bg-white border-b border-slate-200 shadow-2xs relative z-20">
+          {/* Row 1: Compact Brand + Session & Publish Controls */}
+          <div className="w-full px-3 sm:px-5 py-1.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
               {currentUserRole === 'admin' ? (
                 <button
                   type="button"
                   onClick={() => setIsBrandingModalOpen(true)}
                   title="Chỉ Admin: Nhấn để thay đổi Logo, Kích thước & Tên hệ thống"
-                  className="group relative shrink-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer"
+                  className="group relative shrink-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer"
                 >
                   {appBranding.logoUrl ? (
                     <img
                       src={appBranding.logoUrl}
                       alt={appBranding.appName}
                       style={brandLogoStyle}
-                      className={`rounded-xl ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-sm group-hover:ring-2 group-hover:ring-amber-400 transition`}
+                      className={`rounded-lg ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-2xs group-hover:ring-2 group-hover:ring-amber-400 transition`}
                     />
                   ) : (
                     <div
                       style={{ ...brandLogoStyle, fontSize: `${brandLogoFontPx}px` }}
-                      className="rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-md shadow-blue-500/20 group-hover:brightness-110 transition px-1.5 text-center leading-none overflow-hidden"
+                      className="rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-sm shadow-blue-500/20 group-hover:brightness-110 transition px-1.5 text-center leading-none overflow-hidden"
                     >
                       {appBranding.logoText || 'iS'}
                     </div>
                   )}
-                  <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center shadow border border-white opacity-90 group-hover:scale-110 transition">
+                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-500 text-white text-[8px] flex items-center justify-center shadow border border-white opacity-90 group-hover:scale-110 transition">
                     <i className="fa-solid fa-pen"></i>
                   </span>
                 </button>
@@ -2538,64 +2539,62 @@ export default function App() {
                   src={appBranding.logoUrl}
                   alt={appBranding.appName}
                   style={brandLogoStyle}
-                  className={`rounded-xl ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-sm shrink-0`}
+                  className={`rounded-lg ${brandLogoFitClass} bg-white border border-slate-200 p-0.5 shadow-2xs shrink-0`}
                 />
               ) : (
                 <div
                   style={{ ...brandLogoStyle, fontSize: `${brandLogoFontPx}px` }}
-                  className="rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-md shadow-blue-500/20 shrink-0 px-1.5 text-center leading-none overflow-hidden"
+                  className="rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black shadow-sm shadow-blue-500/20 shrink-0 px-1.5 text-center leading-none overflow-hidden"
                 >
                   {appBranding.logoText || 'iS'}
                 </div>
               )}
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {currentUserRole === 'admin' ? (
                     <button
                       type="button"
                       onClick={() => setIsBrandingModalOpen(true)}
                       title="Chỉ Admin: Nhấn để đổi tên hệ thống hoặc logo"
                       data-preserve-content="true"
-                      className="text-left text-base sm:text-lg font-extrabold text-slate-900 tracking-tight hover:text-blue-700 transition cursor-pointer"
+                      className="text-left text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight hover:text-blue-700 transition cursor-pointer"
                     >
                       {appBranding.appName || 'iSMART LMS'}
                     </button>
                   ) : (
                     <h1
                       data-preserve-content="true"
-                      className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight"
+                      className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight"
                     >
                       {appBranding.appName || 'iSMART LMS'}
                     </h1>
                   )}
                   {currentUserRole === 'admin' ? (
-                    <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
-                      <i className="fa-solid fa-user-shield text-[10px]"></i> ADMIN
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1">
+                      <i className="fa-solid fa-user-shield text-[9px]"></i> ADMIN
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-blue-100 text-blue-900 border border-blue-300 flex items-center gap-1">
-                      <i className="fa-solid fa-chalkboard-user text-[10px]"></i>{' '}
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-blue-100 text-blue-900 border border-blue-300 inline-flex items-center gap-1">
+                      <i className="fa-solid fa-chalkboard-user text-[9px]"></i>{' '}
                       <span data-preserve-content={currentTeacher?.name ? 'true' : undefined}>
                         {currentTeacher?.name || 'GIÁO VIÊN'}
                       </span>
                     </span>
                   )}
-                  <span className="px-2 py-0.5 text-[11px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>Đồng bộ Live</span>
-                  </span>
                   {currentUserRole === 'admin' && (
                     <button
                       type="button"
                       onClick={() => setIsBrandingModalOpen(true)}
                       title="Chỉ Admin mới có quyền tùy chỉnh Logo và Tên hệ thống"
-                      className="px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 transition cursor-pointer"
+                      className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1 transition cursor-pointer"
                     >
-                      <i className="fa-solid fa-pen-to-square text-[10px]"></i>
-                      <span>Đổi Logo / Tên</span>
+                      <i className="fa-solid fa-pen-to-square text-[9px]"></i>
+                      <span className="hidden md:inline">Đổi Logo / Tên</span>
                     </button>
                   )}
                 </div>
+
                 {currentUserRole === 'admin' ? (() => {
                   const adminSubtitle =
                     appBranding.appSubtitle !== undefined
@@ -2616,7 +2615,7 @@ export default function App() {
                               : '🗑️ Đã xóa dòng mô tả và đồng bộ Cloud!'
                           );
                         }}
-                        className="hidden sm:flex items-center gap-1.5 mt-1 flex-wrap"
+                        className="hidden sm:flex items-center gap-1 mt-0.5 flex-wrap"
                       >
                         <input
                           type="text"
@@ -2625,14 +2624,14 @@ export default function App() {
                           value={subtitleDraft}
                           onChange={(e) => setSubtitleDraft(e.target.value)}
                           placeholder="Nhập dòng mô tả... (để trống để xóa)"
-                          className="text-xs px-2.5 py-1 rounded-lg border border-blue-400 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[260px] max-w-md"
+                          className="text-[11px] px-2 py-0.5 rounded border border-blue-400 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[220px] max-w-md"
                         />
                         <button
                           type="submit"
-                          className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold transition cursor-pointer"
+                          className="px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold transition cursor-pointer"
                           title="Lưu dòng mô tả"
                         >
-                          <i className="fa-solid fa-check mr-1"></i>Lưu
+                          <i className="fa-solid fa-check mr-0.5"></i>Lưu
                         </button>
                         <button
                           type="button"
@@ -2643,15 +2642,15 @@ export default function App() {
                               '🗑️ Đã xóa dòng mô tả và đồng bộ Cloud!'
                             );
                           }}
-                          className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition cursor-pointer"
+                          className="px-1.5 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold transition cursor-pointer"
                           title="Xóa bỏ dòng mô tả này"
                         >
-                          <i className="fa-solid fa-trash-can mr-1"></i>Xóa dòng
+                          <i className="fa-solid fa-trash-can mr-0.5"></i>Xóa dòng
                         </button>
                         <button
                           type="button"
                           onClick={() => setIsEditingSubtitle(false)}
-                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold transition cursor-pointer"
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold transition cursor-pointer"
                           title="Hủy"
                         >
                           Hủy
@@ -2662,7 +2661,7 @@ export default function App() {
 
                   if (!adminSubtitle.trim()) {
                     return (
-                      <div className="hidden sm:flex items-center mt-0.5">
+                      <div className="hidden sm:flex items-center">
                         <button
                           type="button"
                           onClick={() => {
@@ -2670,9 +2669,9 @@ export default function App() {
                             setIsEditingSubtitle(true);
                           }}
                           title="Chỉ Admin: Thêm lại dòng mô tả dưới tên hệ thống"
-                          className="text-[11px] font-semibold text-slate-400 hover:text-blue-600 border border-dashed border-slate-200 hover:border-blue-300 rounded px-1.5 py-0.5 transition cursor-pointer flex items-center gap-1"
+                          className="text-[10px] font-semibold text-slate-400 hover:text-blue-600 border border-dashed border-slate-200 hover:border-blue-300 rounded px-1.5 py-0 transition cursor-pointer flex items-center gap-1"
                         >
-                          <i className="fa-solid fa-plus text-[9px]"></i>
+                          <i className="fa-solid fa-plus text-[8px]"></i>
                           <span>Thêm dòng mô tả</span>
                         </button>
                       </div>
@@ -2680,7 +2679,7 @@ export default function App() {
                   }
 
                   return (
-                    <div className="hidden sm:flex items-center gap-1.5 group/subtitle">
+                    <div className="hidden sm:flex items-center gap-1 group/subtitle">
                       <p
                         onClick={() => {
                           setSubtitleDraft(adminSubtitle);
@@ -2693,7 +2692,7 @@ export default function App() {
                             ? 'true'
                             : undefined
                         }
-                        className="text-xs text-slate-500 hover:text-blue-700 transition cursor-pointer"
+                        className="text-[11px] text-slate-500 hover:text-blue-700 transition cursor-pointer leading-tight truncate max-w-md"
                       >
                         {adminSubtitle}
                       </p>
@@ -2704,7 +2703,7 @@ export default function App() {
                           setIsEditingSubtitle(true);
                         }}
                         title="Chỉ Admin: Sửa dòng mô tả"
-                        className="opacity-60 group-hover/subtitle:opacity-100 p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition cursor-pointer text-[10px]"
+                        className="opacity-50 group-hover/subtitle:opacity-100 p-0.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition cursor-pointer text-[9px]"
                       >
                         <i className="fa-solid fa-pen"></i>
                       </button>
@@ -2717,135 +2716,24 @@ export default function App() {
                           )
                         }
                         title="Chỉ Admin: Xóa dòng mô tả này"
-                        className="opacity-60 group-hover/subtitle:opacity-100 p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer text-[10px]"
+                        className="opacity-50 group-hover/subtitle:opacity-100 p-0.5 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer text-[9px]"
                       >
                         <i className="fa-solid fa-trash-can"></i>
                       </button>
                     </div>
                   );
                 })() : (
-                  <p className="text-xs text-slate-500 hidden sm:block">
+                  <p className="text-[11px] text-slate-500 hidden sm:block leading-tight">
                     {`Cổng Giáo Viên • Khối phụ trách: ${currentTeacher?.assignedGrades?.join(', ') || 'Chưa phân khối'}`}
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Navigation Tabs based on RBAC */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 flex-wrap gap-1">
-              {/* Tab 1: Soạn Đề */}
+            {/* Right Utility Strip: Duration, Cloud Sync, Save, Publish, Language, Logout */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('edit_exam')) && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('admin')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'admin'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <i className="fa-solid fa-pen-ruler"></i> 1. Soạn Đề
-                </button>
-              )}
-
-              {/* Tab 2: DS Học Sinh & Trường */}
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('manage_students')) && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('students')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'students'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <i className="fa-solid fa-users-gear"></i> 2. DS Học Sinh & Trường
-                </button>
-              )}
-
-              {/* Tab 3: Bảng Điểm & Xuất Kết Quả */}
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('view_scores')) && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('scores')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'scores'
-                      ? 'bg-white text-cyan-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <i className="fa-solid fa-chart-line text-cyan-600"></i> 3. Bảng Điểm & Xuất Điểm
-                </button>
-              )}
-
-              {/* Tab 4: QL Giáo Viên & Phân Quyền (CHỈ DÀNH CHO ADMIN) */}
-              {currentUserRole === 'admin' && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('teachers')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'teachers'
-                      ? 'bg-white text-amber-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <i className="fa-solid fa-user-gear text-amber-600"></i>
-                  <span>4. QL Giáo Viên</span>
-                  <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[10px] font-black">
-                    {teachers.length}
-                  </span>
-                </button>
-              )}
-
-              {/* Tab 4: Mở Trang Thi Độc Lập */}
-              <button
-                type="button"
-                onClick={handleEnterStandaloneStudentPortal}
-                className="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 cursor-pointer"
-              >
-                <i className="fa-solid fa-display"></i> Mở Trang Thi Độc Lập
-              </button>
-
-              {/* Tab 5: Test Chạy Thử Đề Thi */}
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('test_run')) && (
-                <button
-                  type="button"
-                  onClick={() => handleStartTestRun()}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'test' && isTestRunMode
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300'
-                  }`}
-                  title="Chạy thử nghiệm đề thi sau khi soạn để kiểm tra hiển thị câu hỏi, audio, vẽ tô màu và tính điểm"
-                >
-                  <i className="fa-solid fa-play text-xs text-emerald-600"></i>
-                  <span>Test Chạy Thử</span>
-                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-200/90 text-emerald-950 text-[10px] font-black uppercase">
-                    Test
-                  </span>
-                </button>
-              )}
-
-              {/* Tab 6: Cấu hình & Link Thi */}
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('view_json')) && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('json')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    currentMode === 'json'
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <i className="fa-solid fa-code"></i> Cấu hình & Link
-                </button>
-              )}
-            </div>
-
-            {/* Right Tools: Minutes, AI Camera, Offline Printer, PDF, Save & Logout */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('edit_exam')) && (
-                <label className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-700">
+                <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-700">
                   <span>⏱️ Phút:</span>
                   <input
                     type="number"
@@ -2853,55 +2741,18 @@ export default function App() {
                     max={180}
                     value={examMinutes}
                     onChange={(e) => setExamMinutes(+e.target.value || 15)}
-                    className="w-14 px-1.5 py-0.5 text-center font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-11 px-1 py-0 text-center font-bold border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs bg-white"
                   />
                 </label>
               )}
 
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('camera_grader')) && (
-                <button
-                  type="button"
-                  onClick={() => setIsCameraGraderOpen(true)}
-                  title="Chấm bài thi của học sinh bằng camera điện thoại hoặc tải ảnh chụp bài thi"
-                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:from-rose-700 hover:to-purple-700 text-white font-black text-xs sm:text-sm shadow-md shadow-rose-600/25 flex items-center gap-1.5 transition active:scale-95 cursor-pointer ring-2 ring-white/50 animate-pulse hover:animate-none"
-                >
-                  <i className="fa-solid fa-camera"></i>
-                  <span>📷 Chấm Bài Camera AI</span>
-                </button>
-              )}
-
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('print_offline')) && (
-                <button
-                  type="button"
-                  onClick={() => setIsOfflinePrinterOpen(true)}
-                  title="In đề thi giấy và phiếu trả lời trắc nghiệm cho học sinh làm bài offline"
-                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-slate-700 to-slate-900 hover:from-slate-800 hover:to-black text-white font-black text-xs sm:text-sm shadow-md shadow-slate-700/20 flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
-                >
-                  <i className="fa-solid fa-print"></i>
-                  <span>🖨️ In Đề Thi Offline</span>
-                </button>
-              )}
-
-              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('import_pdf')) && (
-                <button
-                  type="button"
-                  onClick={() => setIsPdfImporterOpen(true)}
-                  title="Mở bảng nạp đề từ file PDF của bạn, cắt hình ảnh và trích xuất nội dung vào đề thi"
-                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
-                >
-                  <i className="fa-solid fa-file-pdf"></i>
-                  <span className="hidden lg:inline">Nạp Đề Từ File PDF</span>
-                </button>
-              )}
-
-              {/* Automatic Firebase Cloud Sync Badge (Zero Prompts for All Accounts) */}
               <div
                 title={
                   cloudHealth === 'offline'
                     ? 'Đang ngoại tuyến — dữ liệu lưu tạm trên máy và tự động đồng bộ khi có mạng'
                     : 'Tự động kết nối & lưu dữ liệu trực tiếp lên Firebase Cloud cho mọi tài khoản'
                 }
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold ${
                   cloudHealth === 'offline'
                     ? 'bg-amber-50 border-amber-200 text-amber-800'
                     : 'bg-emerald-50 border-emerald-200 text-emerald-800'
@@ -2916,14 +2767,14 @@ export default function App() {
                       : 'fa-cloud-check text-emerald-600'
                   }`}
                 ></i>
-                <span className="hidden xl:inline">
+                <span className="hidden 2xl:inline">
                   {isCloudSyncing
                     ? 'Đang đồng bộ Cloud...'
                     : cloudHealth === 'offline'
                     ? 'Ngoại tuyến (Tự lưu máy)'
                     : 'Tự động lưu Cloud ✓'}
                 </span>
-                <span className="xl:hidden">
+                <span className="2xl:hidden">
                   {isCloudSyncing ? 'Sync...' : cloudHealth === 'offline' ? 'Offline' : 'Cloud ✓'}
                 </span>
               </div>
@@ -2937,7 +2788,7 @@ export default function App() {
                   disabled={isSaving}
                   onClick={handleManualSaveAndSync}
                   title="Lưu và đồng bộ dữ liệu lên IndexedDB & Firebase Cloud Firestore"
-                  className="px-3 py-2 rounded-xl bg-gradient-to-b from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-green-600/20 flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-60"
+                  className="px-2.5 py-1 rounded-lg bg-gradient-to-b from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-60 whitespace-nowrap"
                 >
                   {isSaving ? (
                     <i className="fa-solid fa-circle-notch fa-spin"></i>
@@ -2953,26 +2804,167 @@ export default function App() {
                   type="button"
                   onClick={() => setIsExportOnlineModalOpen(true)}
                   title="Xuất và phát hành đường link trang thi online độc lập cho học sinh"
-                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-black text-xs sm:text-sm shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer whitespace-nowrap"
                 >
                   <i className="fa-solid fa-globe"></i>
                   <span>Xuất Trang Thi Online</span>
                 </button>
               )}
 
-              {/* UI Language Switcher (EN / VI) */}
               <LanguageToggleButton variant="light" />
 
-              {/* Logout Button */}
               <button
                 type="button"
                 onClick={handleLogout}
                 title="Đăng xuất khỏi tài khoản hiện tại"
-                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-300 font-bold text-xs sm:text-sm transition flex items-center gap-1.5 cursor-pointer"
+                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <i className="fa-solid fa-right-from-bracket text-rose-500"></i>
                 <span className="hidden sm:inline">Đăng Xuất</span>
               </button>
+            </div>
+          </div>
+
+          {/* Row 2: Slim Unified Navigation Tabs + Exam Paper/AI Tools */}
+          <div className="w-full px-3 sm:px-5 py-1.5 bg-slate-50/75 flex flex-wrap items-center justify-between gap-2">
+            {/* Navigation Tabs based on RBAC */}
+            <div className="flex items-center bg-slate-200/70 p-0.5 rounded-lg border border-slate-200 overflow-x-auto max-w-full gap-0.5">
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('edit_exam')) && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('admin')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'admin'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-pen-ruler"></i> 1. Soạn Đề
+                </button>
+              )}
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('manage_students')) && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('students')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'students'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-users-gear"></i> 2. DS Học Sinh & Trường
+                </button>
+              )}
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('view_scores')) && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('scores')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'scores'
+                      ? 'bg-white text-cyan-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-chart-line text-cyan-600"></i> 3. Bảng Điểm & Xuất Điểm
+                </button>
+              )}
+
+              {currentUserRole === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('teachers')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'teachers'
+                      ? 'bg-white text-amber-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-user-gear text-amber-600"></i>
+                  <span>4. QL Giáo Viên</span>
+                  <span className="px-1.5 py-0 rounded-full bg-amber-200 text-amber-900 text-[10px] font-black">
+                    {teachers.length}
+                  </span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleEnterStandaloneStudentPortal}
+                className="px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 text-blue-800 bg-blue-50/90 hover:bg-blue-100 border border-blue-200/80 cursor-pointer"
+              >
+                <i className="fa-solid fa-display"></i> Mở Trang Thi Độc Lập
+              </button>
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('test_run')) && (
+                <button
+                  type="button"
+                  onClick={() => handleStartTestRun()}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'test' && isTestRunMode
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-emerald-800 bg-emerald-50/90 hover:bg-emerald-100 border border-emerald-200'
+                  }`}
+                  title="Chạy thử nghiệm đề thi sau khi soạn để kiểm tra hiển thị câu hỏi, audio, vẽ tô màu và tính điểm"
+                >
+                  <i className={`fa-solid fa-play text-[10px] ${currentMode === 'test' && isTestRunMode ? 'text-white' : 'text-emerald-600'}`}></i>
+                  <span>Test Chạy Thử</span>
+                </button>
+              )}
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('view_json')) && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('json')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    currentMode === 'json'
+                      ? 'bg-white text-blue-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-code"></i> Cấu hình & Link
+                </button>
+              )}
+            </div>
+
+            {/* Compact Paper / PDF / Camera AI Tools */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('camera_grader')) && (
+                <button
+                  type="button"
+                  onClick={() => setIsCameraGraderOpen(true)}
+                  title="Chấm bài thi của học sinh bằng camera điện thoại hoặc tải ảnh chụp bài thi"
+                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:from-rose-700 hover:to-purple-700 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer whitespace-nowrap"
+                >
+                  <i className="fa-solid fa-camera"></i>
+                  <span>Chấm Bài Camera AI</span>
+                </button>
+              )}
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('print_offline')) && (
+                <button
+                  type="button"
+                  onClick={() => setIsOfflinePrinterOpen(true)}
+                  title="In đề thi giấy và phiếu trả lời trắc nghiệm cho học sinh làm bài offline"
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer whitespace-nowrap"
+                >
+                  <i className="fa-solid fa-print"></i>
+                  <span>In Đề Thi Offline</span>
+                </button>
+              )}
+
+              {(currentUserRole === 'admin' || currentTeacher?.permissions.includes('import_pdf')) && (
+                <button
+                  type="button"
+                  onClick={() => setIsPdfImporterOpen(true)}
+                  title="Mở bảng nạp đề từ file PDF của bạn, cắt hình ảnh và trích xuất nội dung vào đề thi"
+                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer whitespace-nowrap"
+                >
+                  <i className="fa-solid fa-file-pdf"></i>
+                  <span>Nạp Đề Từ File PDF</span>
+                </button>
+              )}
             </div>
           </div>
         </header>

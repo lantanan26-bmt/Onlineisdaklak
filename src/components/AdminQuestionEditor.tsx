@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Question, QuestionType, FillBlankBox, ConnectPairPoint, ColourItem, ExamPart, GradeExamProfile } from '../types';
 import { getAdvancedGrade2Questions, getAdvancedGrade2Parts, GRADE2_MEDIA } from '../demoData';
 import { QuestionAudioEditor } from './QuestionAudioEditor';
-import { AdminPartHeader } from './AdminPartHeader';
+import { AdminPartHeader, AddQuestionButtonsRow } from './AdminPartHeader';
 import { GradeExamSelectorBar } from './GradeExamSelectorBar';
 import {
   CAMBRIDGE_CRAYONS,
@@ -1130,73 +1130,10 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                   <p className="text-xs text-slate-500">
                     Bấm chọn kiểu câu hỏi bên dưới để thêm câu đầu tiên vào Part {secIdx + 1}:
                   </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('multiple-choice', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
-                    >
-                      + Trắc nghiệm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('yes-no', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-                    >
-                      <i className="fa-solid fa-circle-question"></i>
-                      <span>+ Yes - No</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('multi-choice', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-                    >
-                      <i className="fa-solid fa-list-check"></i>
-                      <span>+ Multi-choice</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listening', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Bài nghe
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('tick-cross', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Tick/Cross
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listen-colour', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      🎨 + Nghe & Tô màu
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listen-write', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Nghe & Viết
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('connect-pairs', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Nối điểm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('fill-blanks', part.id)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Điền ô ảnh
-                    </button>
-                  </div>
+                  <AddQuestionButtonsRow
+                    onAdd={(t) => handleAddQuestionToPart(t, part.id)}
+                    centered
+                  />
                 </div>
               ) : (
                 <div className="space-y-4 pl-0 sm:pl-3 border-l-0 sm:border-l-4 border-indigo-200">
@@ -4923,75 +4860,9 @@ export const AdminQuestionEditor: React.FC<AdminQuestionEditorProps> = ({
                     <i className="fa-solid fa-plus-circle text-indigo-600 text-sm"></i>
                     <span>Thêm câu hỏi tiếp theo vào Part {secIdx + 1}:</span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('multiple-choice', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
-                    >
-                      + Trắc nghiệm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('yes-no', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-                      title="Dạng câu hỏi Đúng / Sai: Chọn YES hoặc NO"
-                    >
-                      <i className="fa-solid fa-circle-question text-[10px]"></i>
-                      <span>+ Yes - No</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('multi-choice', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-                      title="Dạng trắc nghiệm chọn nhiều đáp án đúng"
-                    >
-                      <i className="fa-solid fa-list-check text-[10px]"></i>
-                      <span>+ Multi-choice</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listening', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Bài nghe
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listen-colour', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      🎨 + Tô màu
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('tick-cross', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Tick/Cross
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('listen-write', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Nghe & Viết
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('connect-pairs', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Nối điểm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToPart('fill-blanks', part.id)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
-                    >
-                      + Điền ô ảnh
-                    </button>
-                  </div>
+                  <AddQuestionButtonsRow
+                    onAdd={(t) => handleAddQuestionToPart(t, part.id)}
+                  />
                 </div>
               </div>
             )}

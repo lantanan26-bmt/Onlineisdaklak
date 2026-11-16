@@ -1022,92 +1022,102 @@ export const AdminPartHeader: React.FC<AdminPartHeaderProps> = ({
           <i className="fa-solid fa-plus-circle text-indigo-400"></i>
           <span>Thêm câu hỏi vào Part {partIndex + 1}:</span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('multiple-choice')}
-            className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs transition cursor-pointer"
-            title="Trắc nghiệm 1 đáp án đúng (Multiple-choice)"
-          >
-            + Trắc nghiệm
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('yes-no')}
-            className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-            title="Dạng câu hỏi Đúng / Sai: Chọn YES hoặc NO"
-          >
-            <i className="fa-solid fa-circle-question text-[10px]"></i>
-            <span>+ Yes - No</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('multi-choice')}
-            className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
-            title="Dạng trắc nghiệm nhiều đáp án đúng (Hộp kiểm Checkbox)"
-          >
-            <i className="fa-solid fa-list-check text-[10px]"></i>
-            <span>+ Multi-choice</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('listening')}
-            className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Bài nghe
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('listen-colour')}
-            className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer"
-            title="Cambridge Listening: Nghe audio và tô màu chi tiết trên tranh"
-          >
-            🎨 + Nghe & Tô màu
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('tick-cross')}
-            className="px-2.5 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Tick/Cross
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('listen-write')}
-            className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Nghe & Viết
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('unscramble-word')}
-            className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Xếp chữ
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('story-word-bank')}
-            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Đoạn văn
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('connect-pairs')}
-            className="px-2.5 py-1 rounded-lg bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Nối điểm
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddQuestionToPart('fill-blanks')}
-            className="px-2.5 py-1 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
-          >
-            + Điền ô ảnh
-          </button>
-        </div>
+        <AddQuestionButtonsRow onAdd={onAddQuestionToPart} />
       </div>
     </div>
   );
 };
+
+export const AddQuestionButtonsRow: React.FC<{
+  onAdd: (type: QuestionType) => void;
+  centered?: boolean;
+}> = ({ onAdd, centered = false }) => (
+  <div className={`flex flex-wrap items-center gap-1.5 ${centered ? 'justify-center' : ''}`}>
+    <button
+      type="button"
+      onClick={() => onAdd('multiple-choice')}
+      className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+      title="Trắc nghiệm 1 đáp án đúng (Multiple-choice)"
+    >
+      + Trắc nghiệm
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('yes-no')}
+      className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
+      title="Dạng câu hỏi Đúng / Sai: Chọn YES hoặc NO"
+    >
+      <i className="fa-solid fa-circle-question text-[10px]"></i>
+      <span>+ Yes - No</span>
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('multi-choice')}
+      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
+      title="Dạng trắc nghiệm nhiều đáp án đúng (Hộp kiểm Checkbox)"
+    >
+      <i className="fa-solid fa-list-check text-[10px]"></i>
+      <span>+ Multi-choice</span>
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('listening')}
+      className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+    >
+      + Bài nghe
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('listen-colour')}
+      className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+      title="Cambridge Listening: Nghe audio và tô màu chi tiết trên tranh"
+    >
+      🎨 + Nghe & Tô màu
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('tick-cross')}
+      className="px-2.5 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+    >
+      + Tick/Cross
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('listen-write')}
+      className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+    >
+      + Nghe & Viết
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('unscramble-word')}
+      className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+      title="Sắp xếp các chữ cái thành từ đúng (Unscramble Word)"
+    >
+      + Xếp chữ
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('story-word-bank')}
+      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+      title="Đoạn văn & Ngân hàng từ (Story Word Bank)"
+    >
+      + Đoạn văn
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('connect-pairs')}
+      className="px-2.5 py-1 rounded-lg bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+    >
+      + Nối điểm
+    </button>
+    <button
+      type="button"
+      onClick={() => onAdd('fill-blanks')}
+      className="px-2.5 py-1 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+    >
+      + Điền ô ảnh
+    </button>
+  </div>
+);
+
